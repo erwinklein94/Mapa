@@ -14,6 +14,8 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - Analista, Fiscal, Especialista e Coordenador: consultam e editam os mesmos registros e fotos.
 - Contas criadas fora do fluxo administrativo não têm perfil e não acessam dados.
 - Fotos ficam em bucket privado e são exibidas com URLs temporárias.
+- A página Documentos permite ao Editor enviar e excluir PDFs e planilhas Excel (.xls/.xlsx), até 50 MB por arquivo. Todos os perfis cadastrados podem pesquisar e baixar os documentos; visitantes sem login não têm acesso. Arquivos ficam no bucket privado `documents`, fora do GitHub. As políticas estão em `supabase/documents.sql`.
+- A biblioteca inicial contém os 13 PDFs e a planilha fornecidos pelo usuário. A importação em `scripts/import-documents.mjs` recebe o diretório dos arquivos e credenciais via ambiente, e verifica cada download por SHA-256 sem alterar o conteúdo. Downloads feitos pelos perfis comuns são registrados na auditoria.
 - Auditoria de alterações é produzida por triggers, com dados anteriores e posteriores; navegação é registrada pelo cliente. Não é um registro de telemetria inviolável de todas as leituras da API.
 - O SQL em `supabase/schema.sql` documenta o esquema instalado. A função `manage-users.ts` é publicada no Supabase com verificação JWT e validação adicional do Editor no servidor.
 
