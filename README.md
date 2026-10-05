@@ -33,6 +33,10 @@ Validação inicial: todos os testes acima passaram; dados temporários removido
 
 ## Publicação
 
-Manifesto do Sites em `.openai/hosting.json`. Publicação inicialmente privada, conforme o padrão da plataforma; para acesso de outras pessoas, ajustar o compartilhamento da hospedagem. O login e as regras do Supabase continuam obrigatórios. O projeto não grava credenciais do Editor no código.
+Hospedagem principal: https://erwinklein94.github.io/Mapa/
+
+O workflow `.github/workflows/pages.yml` instala as dependências, compila e publica somente `dist` a cada push na `main`. O GitHub Pages deve usar a origem **GitHub Actions**. Os caminhos dos arquivos são relativos e funcionam no subdiretório `/Mapa/`. O endereço é público, com acesso à aplicação protegido pelo login e pelas permissões do Supabase.
+
+O manifesto da publicação anterior no Sites está em `.openai/hosting.json`; ela é independente do GitHub Pages. O projeto não grava credenciais do Editor no código.
 
 O Supabase sinaliza que a proteção contra senhas vazadas está desativada; pode ser habilitada nas configurações de Auth quando disponível no plano.
