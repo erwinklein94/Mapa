@@ -19,7 +19,7 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 
 ## Malha
 
-O arquivo original possui somente pontos, sem geometrias LineString. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores têm raio 2px (diâmetro 4px) e tolerância maior para clique.
+O arquivo original possui somente pontos, sem geometrias LineString. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores têm raio 4px (diâmetro 8px) e tolerância maior para clique. Os nomes aparecem automaticamente ao lado dos pontos, com contorno branco para leitura sobre o mapa. Pontos e nomes são desenhados no mesmo canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
 
 Para reconverter o arquivo: `pwsh scripts/import-kmz.ps1 -InputFile "CAMINHO_DO_KMZ_ZIP"`. Os IDs seguem a ordem original; antes de substituir por uma nova malha, revisar correspondência dos IDs para preservar os registros existentes.
 
