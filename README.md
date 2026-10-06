@@ -20,6 +20,12 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - Auditoria de alterações é produzida por triggers, com dados anteriores e posteriores; navegação é registrada pelo cliente. Não é um registro de telemetria inviolável de todas as leituras da API.
 - O SQL em `supabase/schema.sql` documenta o esquema instalado. A função `manage-users.ts` é publicada no Supabase com verificação JWT e validação adicional do Editor no servidor.
 
+## Interface
+
+- O botão de menu (☰) no topo recolhe a barra lateral para uma coluna só de ícones. A escolha fica salva no navegador.
+- Na página Mapa, "Modo Apresentação" coloca a página em tela cheia e esconde a barra lateral, o topo e o painel de camadas, que abre pelo botão "Camadas". Para sair, use "Sair da apresentação" ou Esc.
+- O botão de sol/lua alterna entre tema claro e escuro. A página sempre abre no tema claro. No tema escuro, a base "Ruas" é escurecida por filtro CSS.
+
 ## Malha
 
 O arquivo original possui somente pontos, sem geometrias LineString. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores têm raio 4px (diâmetro 8px) e tolerância maior para clique. Os nomes aparecem automaticamente ao lado dos pontos, com contorno branco para leitura sobre o mapa. Pontos e nomes são desenhados no mesmo canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
