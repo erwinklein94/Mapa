@@ -13,6 +13,7 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - Editor: cria contas e consulta auditoria, além das ações comuns.
 - Analista, Fiscal, Especialista e Coordenador: consultam e editam os mesmos registros e fotos.
 - Contas criadas fora do fluxo administrativo não têm perfil e não acessam dados.
+- “Sair da conta” encerra só a sessão do navegador atual. Se a sessão for encerrada no servidor, o app pede novo login em vez de falhar ao criar contas.
 - Fotos ficam em bucket privado e são exibidas com URLs temporárias.
 - A página Documentos permite ao Editor enviar e excluir PDFs e planilhas Excel (.xls/.xlsx), até 50 MB por arquivo. Todos os perfis cadastrados podem pesquisar e baixar os documentos; visitantes sem login não têm acesso. Arquivos ficam no bucket privado `documents`, fora do GitHub. As políticas estão em `supabase/documents.sql`.
 - A biblioteca inicial contém os 13 PDFs e a planilha fornecidos pelo usuário. A importação em `scripts/import-documents.mjs` recebe o diretório dos arquivos e credenciais via ambiente, e verifica cada download por SHA-256 sem alterar o conteúdo. Downloads feitos pelos perfis comuns são registrados na auditoria.
