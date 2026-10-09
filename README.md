@@ -1,6 +1,6 @@
 # Mapa de Operações
 
-Aplicação em português para consultar os pontos da Operação Norte presentes no KMZ da Rumo e cadastrar AMVs, estações, pátios e sedes. Interface com a paleta e fontes do [brandbook Rumo](https://brandbook.rumolog.com/).
+Aplicação em português para explorar a prancha completa de operações da Rumo, consultar a malha geográfica e cadastrar AMVs, estações, pátios e sedes. Interface com a paleta e fontes do [brandbook Rumo](https://brandbook.rumolog.com/).
 
 ## Desenvolvimento
 
@@ -25,26 +25,50 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - O botão de menu (☰) no topo recolhe a barra lateral para uma coluna só de ícones. A escolha fica salva no navegador.
 - Na página Mapa, "Modo Apresentação" coloca a página em tela cheia e esconde a barra lateral, o topo e o painel de camadas, que abre pelo botão "Camadas". Para sair, use "Sair da apresentação" ou Esc.
 - O botão de sol/lua alterna entre tema claro e escuro. A página sempre abre no tema claro. No tema escuro, a base "Ruas" é escurecida por filtro CSS.
-- A camada "SB · Operação Norte" começa desligada. Ao ativá-la, o mapa mostra 657 segmentos do arquivo `Ferrovia SB.kml` em ciano; passe o cursor ou clique em uma linha para consultar o número da SB e seus KMs de início e fim.
-- O seletor "Trecho da Operação Norte" oferece os trechos 06 a 00 do PDF `09-TRECHOS.pdf`. A seleção mostra apenas os pontos e SB associados ao trecho, enquadra a área e liga a camada SB. "Todos os trechos" limpa essa seleção. A busca do mapa também respeita o trecho escolhido.
+- A página Mapa abre na **Prancha interativa**, sem seleção de SUB, tipo de registro ou tipo de linha. A prancha mantém as cores, símbolos, limites, conexões, setas e notas do PDF original. Zoom, arraste, busca, seleção de SUB e sete atalhos de detalhes permitem navegar pelo documento.
+- Clicar em um rótulo abre sua referência e o atalho para Registros. A busca aceita nomes, siglas, KMs e números de SUB. Cada ocorrência tem posição própria, inclusive quando a mesma localidade aparece em mais de um detalhe.
+- **Mapa geográfico** mostra todos os pontos do KMZ e todas as SB do KML, com camadas independentes, nomes de pontos, filtros opcionais por tipo de registro e linha e bases Ruas/Terreno. Nenhum filtro de tipo começa selecionado.
+- Registros possui cinco abas: **Localidades e KMs**, **SUB**, **SB**, **Pontos e cadastros**, **Notas e conexões**. Há busca, paginação, seleção da área do PDF, exportação CSV e navegação até a informação no mapa. Nos cadastros, siglas idênticas às do PDF oferecem atalhos para suas referências na prancha.
 
-## Malha
+## Fontes e cobertura
 
-O arquivo original possui somente pontos, sem geometrias LineString. A seleção publicada contém 1.024 pontos próximos ao traçado azul da Operação Norte no PDF `01-OPERAÇÃO (1).pdf`, fornecido pelo usuário. Os demais pontos do KMZ não são exibidos, inclusive quando há uma versão editada no banco. A seleção foi feita pela correspondência aproximada entre as coordenadas do KMZ e o desenho esquemático do PDF; não é uma delimitação ferroviária oficial. Alguns trechos desenhados no PDF, sobretudo ao norte, não têm pontos correspondentes no KMZ. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores azuis têm raio 4px (diâmetro 8px) e tolerância maior para clique. Os nomes aparecem automaticamente ao lado dos pontos, com contorno branco para leitura sobre o mapa. Pontos e nomes são desenhados no mesmo canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
+### Prancha de operação
 
-As linhas de SB vêm do KML fornecido pelo usuário. Das 2.025 SB do arquivo, 657 foram selecionadas por proximidade ao traçado azul do PDF e por afastamento dos trechos verdes da Operação Sul. Como o PDF é esquemático, a delimitação é aproximada; os pontos e KMs das linhas permanecem exatamente como no KML. A camada é independente dos filtros de tipo de ponto e não altera registros no banco.
+`MAPA_OPERAÇÃO.pdf`, fornecido pelo usuário, contém uma página A0. O carimbo informa **Base SIV, atualizada em DEZ-2023**; essa data aparece no site e não representa uma atualização operacional em tempo real.
 
-Os trechos 06 a 00 foram associados às linhas de SB comparando suas coordenadas com as faixas coloridas da região Norte no PDF `09-TRECHOS.pdf`. Os pontos do KMZ receberam o trecho da SB mais próxima. Essa correspondência é aproximada porque o PDF é esquemático e não fornece coordenadas dos limites entre trechos. Registros criados no site aparecem no filtro quando ficam a até aproximadamente 2 km de uma SB classificada. O Trecho 04 possui 86 SB classificadas, mas nenhum dos 1.024 pontos selecionados do KMZ.
+O catálogo preserva **1.512 objetos de texto**, sem eliminar repetições: 903 localidades com siglas, 276 quilometragens, 122 conexões, 90 notas e referências, 15 títulos de detalhes e 106 ocorrências numéricas de SUB, correspondentes a **91 números distintos**. A classificação serve à consulta; o texto original e sua posição permanecem disponíveis.
 
-Para reconverter o arquivo: `pwsh scripts/import-kmz.ps1 -InputFile "CAMINHO_DO_KMZ_ZIP"`. Os IDs seguem a ordem original; antes de substituir por uma nova malha, revisar correspondência dos IDs para preservar os registros existentes.
+A imagem integral é servida em 688 blocos PNG, com três níveis de resolução e ampliação de até quatro vezes a escala PDF. Isso preserva também informações gráficas que não são objetos de texto. Os sete quadros de detalhe são Santos; Iperó/Amador Bueno/Canguera/Salto; Campinas; Araraquara; SUB 76 Iperó–Rubião Junior; Anápolis; e SUB 78 Bauru–Itirapina.
 
-Base de ruas: OpenStreetMap. Base de terreno: Esri World Topographic Map, com atribuições no mapa. “Ruas” é cartografia viária, não imagens panorâmicas Street View. As bases dependem de conexão e disponibilidade dos provedores.
+O PDF original completo e o catálogo JSON podem ser baixados pelo site. O SHA-256 da fonte está no catálogo. A prancha é um **desenho esquemático**: as cores e divisões de SUB são consultadas nela. Não são atribuídas coordenadas geográficas, SUB ou operações aos pontos por proximidade visual. A classificação geográfica por operação/SUB exige correspondência operacional validada.
+
+Para reproduzir a importação (Python com `pypdfium2` e `Pillow`):
+
+```powershell
+python scripts/import-operation.py "CAMINHO_DO_MAPA_OPERAÇÃO.pdf" "CAMINHO_DO_Ferrovia SB.kml"
+python scripts/verify-operation.py "CAMINHO_DO_Ferrovia SB.kml"
+npm run build
+```
+
+### Malha geográfica
+
+Os **10.444 pontos** do KMZ original foram restaurados, com os mesmos IDs e coordenadas, para incluir toda a malha. O arquivo não contém linhas ferroviárias; não são criadas ligações artificiais entre seus pontos. Alterações e cadastros da equipe continuam sendo mesclados por ID com os dados do banco.
+
+As **2.025 SB** do arquivo `Ferrovia SB.kml` estão disponíveis integralmente. IDs, coordenadas, KM inicial e final são preservados. As SB aparecem em ciano; a paleta de cada SUB permanece na prancha original. O recorte aproximado anterior da Operação Norte e a associação aproximada aos trechos 00–06 foram substituídos pela cobertura integral solicitada.
+
+`source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os KMs de entrada/saída são preenchidos após validação operacional. Nomes e pontos são desenhados em canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
+
+Para reconverter o KMZ: `pwsh scripts/import-kmz.ps1 -InputFile "CAMINHO_DO_KMZ_ZIP"`. Os IDs seguem a ordem original; antes de substituir a fonte, revisar a correspondência dos IDs para preservar os cadastros.
+
+Base de ruas: OpenStreetMap. Base de terreno: Esri World Topographic Map, com atribuições no mapa. As bases dependem de conexão e disponibilidade dos provedores.
 
 ## Verificação
 
 `scripts/verify.mjs` testa coordenadas e contagem do KMZ, login, criação de conta, CRUD de ponto, fotos privadas, auditoria e bloqueios de privilégio. Requer `TEST_EMAIL` e `TEST_PASSWORD` via ambiente. Cria um usuário temporário e imprime apenas seu ID para remoção administrativa após a execução. Não salva credenciais.
 
-Validação inicial: todos os testes acima passaram; dados temporários removidos. A automação do navegador não iniciou neste ambiente, portanto a revisão visual automatizada não foi concluída.
+`python scripts/verify-operation.py [CAMINHO_KML]` verifica offline o hash do PDF, os 1.512 textos contra a fonte, os limites das posições, as 91 SUB, os sete detalhes, os 688 blocos de imagem, a contagem e coordenadas dos pontos e das SB. Com o KML como argumento, compara também todos os IDs, KMs e vértices importados.
+
+A interface da prancha e dos registros foi conferida em navegador local, incluindo busca, navegação entre páginas, SUB, SB, camadas geográficas e tamanho móvel. Os testes dessa mudança não alteram usuários ou dados de produção.
 
 ## Publicação
 
