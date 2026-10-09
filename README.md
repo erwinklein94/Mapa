@@ -25,10 +25,13 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - O botão de menu (☰) no topo recolhe a barra lateral para uma coluna só de ícones. A escolha fica salva no navegador.
 - Na página Mapa, "Modo Apresentação" coloca a página em tela cheia e esconde a barra lateral, o topo e o painel de camadas, que abre pelo botão "Camadas". Para sair, use "Sair da apresentação" ou Esc.
 - O botão de sol/lua alterna entre tema claro e escuro. A página sempre abre no tema claro. No tema escuro, a base "Ruas" é escurecida por filtro CSS.
+- A camada "SB · Operação Norte" começa desligada. Ao ativá-la, o mapa mostra 657 segmentos do arquivo `Ferrovia SB.kml` em ciano; passe o cursor ou clique em uma linha para consultar o número da SB e seus KMs de início e fim.
 
 ## Malha
 
 O arquivo original possui somente pontos, sem geometrias LineString. A seleção publicada contém 1.024 pontos próximos ao traçado azul da Operação Norte no PDF `01-OPERAÇÃO (1).pdf`, fornecido pelo usuário. Os demais pontos do KMZ não são exibidos, inclusive quando há uma versão editada no banco. A seleção foi feita pela correspondência aproximada entre as coordenadas do KMZ e o desenho esquemático do PDF; não é uma delimitação ferroviária oficial. Alguns trechos desenhados no PDF, sobretudo ao norte, não têm pontos correspondentes no KMZ. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores azuis têm raio 4px (diâmetro 8px) e tolerância maior para clique. Os nomes aparecem automaticamente ao lado dos pontos, com contorno branco para leitura sobre o mapa. Pontos e nomes são desenhados no mesmo canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
+
+As linhas de SB vêm do KML fornecido pelo usuário. Das 2.025 SB do arquivo, 657 foram selecionadas por proximidade ao traçado azul do PDF e por afastamento dos trechos verdes da Operação Sul. Como o PDF é esquemático, a delimitação é aproximada; os pontos e KMs das linhas permanecem exatamente como no KML. A camada é independente dos filtros de tipo de ponto e não altera registros no banco.
 
 Para reconverter o arquivo: `pwsh scripts/import-kmz.ps1 -InputFile "CAMINHO_DO_KMZ_ZIP"`. Os IDs seguem a ordem original; antes de substituir por uma nova malha, revisar correspondência dos IDs para preservar os registros existentes.
 
