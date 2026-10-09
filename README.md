@@ -1,6 +1,6 @@
 # Mapa de Operações
 
-Aplicação em português para consultar os 10.444 pontos do KMZ da Rumo e cadastrar AMVs, estações, pátios e sedes. Interface com a paleta e fontes do [brandbook Rumo](https://brandbook.rumolog.com/).
+Aplicação em português para consultar os pontos da Operação Norte presentes no KMZ da Rumo e cadastrar AMVs, estações, pátios e sedes. Interface com a paleta e fontes do [brandbook Rumo](https://brandbook.rumolog.com/).
 
 ## Desenvolvimento
 
@@ -28,7 +28,7 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 
 ## Malha
 
-O arquivo original possui somente pontos, sem geometrias LineString. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores têm raio 4px (diâmetro 8px) e tolerância maior para clique. Os nomes aparecem automaticamente ao lado dos pontos, com contorno branco para leitura sobre o mapa. Pontos e nomes são desenhados no mesmo canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
+O arquivo original possui somente pontos, sem geometrias LineString. A seleção publicada contém 1.024 pontos próximos ao traçado azul da Operação Norte no PDF `01-OPERAÇÃO (1).pdf`, fornecido pelo usuário. Os demais pontos do KMZ não são exibidos, inclusive quando há uma versão editada no banco. A seleção foi feita pela correspondência aproximada entre as coordenadas do KMZ e o desenho esquemático do PDF; não é uma delimitação ferroviária oficial. Alguns trechos desenhados no PDF, sobretudo ao norte, não têm pontos correspondentes no KMZ. Não foram inventados segmentos entre pontos nem classificações de linha. `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os campos de KM de entrada/saída são preenchidos manualmente após validação operacional. Marcadores azuis têm raio 4px (diâmetro 8px) e tolerância maior para clique. Os nomes aparecem automaticamente ao lado dos pontos, com contorno branco para leitura sobre o mapa. Pontos e nomes são desenhados no mesmo canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
 
 Para reconverter o arquivo: `pwsh scripts/import-kmz.ps1 -InputFile "CAMINHO_DO_KMZ_ZIP"`. Os IDs seguem a ordem original; antes de substituir por uma nova malha, revisar correspondência dos IDs para preservar os registros existentes.
 
