@@ -27,7 +27,7 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - O botão de sol/lua alterna entre tema claro e escuro. A página sempre abre no tema claro. No tema escuro, a base "Ruas" é escurecida por filtro CSS.
 - A página Mapa abre na **Prancha interativa**, sem seleção de SUB, tipo de registro ou tipo de linha. A prancha mantém as cores, símbolos, limites, conexões, setas e notas do PDF original. Zoom, arraste, busca, seleção de SUB e sete atalhos de detalhes permitem navegar pelo documento.
 - Clicar em um rótulo abre sua referência e o atalho para Registros. A busca aceita nomes, siglas, KMs e números de SUB. Cada ocorrência tem posição própria, inclusive quando a mesma localidade aparece em mais de um detalhe.
-- **Mapa geográfico** mostra todos os pontos do KMZ e todas as SB do KML, com camadas independentes, nomes de pontos, filtros opcionais por tipo de registro e linha e bases Ruas/Terreno. Nenhum filtro de tipo começa selecionado.
+- **Mapa geográfico** oferece camadas independentes para os pontos do KMZ, as SB do KML e as PN do arquivo `Pns.zip`. Todas as camadas e os nomes dos pontos começam desligados; cada uma pode ser ativada ou desativada no painel. Os filtros opcionais de tipo de registro e linha começam em “Todos”.
 - Registros possui cinco abas: **Localidades e KMs**, **SUB**, **SB**, **Pontos e cadastros**, **Notas e conexões**. Há busca, paginação, seleção da área do PDF, exportação CSV e navegação até a informação no mapa. Nos cadastros, siglas idênticas às do PDF oferecem atalhos para suas referências na prancha.
 
 ## Fontes e cobertura
@@ -55,6 +55,8 @@ npm run build
 Os **10.444 pontos** do KMZ original foram restaurados, com os mesmos IDs e coordenadas, para incluir toda a malha. O arquivo não contém linhas ferroviárias; não são criadas ligações artificiais entre seus pontos. Alterações e cadastros da equipe continuam sendo mesclados por ID com os dados do banco.
 
 As **2.025 SB** do arquivo `Ferrovia SB.kml` estão disponíveis integralmente. IDs, coordenadas, KM inicial e final são preservados. As SB aparecem em ciano; a paleta de cada SUB permanece na prancha original. O recorte aproximado anterior da Operação Norte e a associação aproximada aos trechos 00–06 foram substituídos pela cobertura integral solicitada.
+
+As **3.686 PN** foram extraídas dos pontos com `Tipo=PN` e das pastas de PN do KMZ enviado em `Pns.zip`. Linhas, polígonos e pontos de outras pastas não integram essa camada. As coordenadas vêm dos elementos `Point` do KML; nome, KM, município, UF e trecho são mostrados quando presentes na origem. A camada PN aparece em laranja e inicia desligada.
 
 `source_km` preserva literalmente o texto recebido, pois existem valores em escalas diferentes. Os KMs de entrada/saída são preenchidos após validação operacional. Nomes e pontos são desenhados em canvas para evitar milhares de elementos HTML; o renderizador estende o Leaflet 1.9.4 fixado no projeto.
 
