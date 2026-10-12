@@ -18,11 +18,15 @@ const fixture=`
  import {createLocationContext} from './src/location-context.js';
  import {openLocationDetails} from './src/location-modal.js';
  import {createMalhaIndex} from './src/malhas.js';
- const names=['rail-points','rail-sb','rail-pns','rail-stations','rail-malhas','operation/catalog','operation-2015/catalog'];
- const [base,sbSegments,pnPoints,stations,malhas,c1,c2]=await Promise.all(names.map(n=>fetch('assets/'+n+'.json').then(r=>r.json())));
- const points=base.map(p=>({...p,kind:'Ponto ferroviário',line_type:'Não classificada'}));
+ import {createSubIndex,decorateSubs} from './src/subs.js';
+ const names=['rail-points','rail-sb','rail-pns','rail-stations','rail-malhas','rail-subs','operation/catalog','operation-2015/catalog'];
+ const [base,rawSB,rawPN,rawStations,malhas,subs,c1,c2]=await Promise.all(names.map(n=>fetch('assets/'+n+'.json').then(r=>r.json())));
+ const malhaIndex=createMalhaIndex(malhas),subIndex=createSubIndex(rawStations,malhaIndex,rawPN);
+ const points=decorateSubs(base.map(p=>({...p,kind:'Ponto ferroviário',line_type:'Não classificada'})),'point',subIndex,subs.assignments.points);
+ const sbSegments=decorateSubs(rawSB,'sb',subIndex,subs.assignments.sb),pnPoints=decorateSubs(rawPN,'pn',subIndex,subs.assignments.pn),stations=decorateSubs(rawStations,'station',subIndex);
  const catalogs=[{...c1,id:'operation-2023',assetBase:'assets/operation'},{...c2,id:'rumo-2015',assetBase:'assets/operation-2015'}];
- const malhaIndex=createMalhaIndex(malhas),data={points,sbSegments,pnPoints,stations,catalogs,malhaIndex};
+ const subOptions=[...new Set([...subs.subs,...c1.subs,...c2.subs])].sort((a,b)=>Number(a)-Number(b));
+ const data={points,sbSegments,pnPoints,stations,catalogs,malhaIndex,subOptions};
  const context=createLocationContext(data),root=document.querySelector('#content');let view,map;
  function dialog(title,body){const d=document.querySelector('#modal');d.classList.remove('location-dialog');d.innerHTML='<div class="modal-head"><h2></h2><button class="close" aria-label="Fechar">×</button></div><div class="modal-body">'+body+'</div>';d.querySelector('h2').textContent=title;d.querySelector('.close').onclick=()=>d.close();if(!d.open)d.showModal()}
  function inspect(reference,filters){openLocationDetails({reference,context,filters,dialog,onEdit:p=>{window.lastEdit=p.id;dialog('Editar cadastro','Formulário existente')},onMap:mountMap})}
@@ -73,6 +77,23 @@ try{
  await page.click('[data-location-map]');
  assert.equal(await page.locator('#geo-malha').inputValue(),'RMN');
  assert.equal(await page.locator('#geo-pn').inputValue(),'on');
+ await page.selectOption('#geo-malha','');
+ await page.selectOption('#geo-sub-from','74');
+ assert.equal(await page.locator('#geo-sub-to').isEnabled(),true);
+ await expectText('#operation-caption','SUB 74');
+ const exact=await page.locator('#operation-caption').innerText();
+ await page.selectOption('#geo-sub-to','98');
+ await expectText('#operation-caption','SUB 74–98');
+ const range=await page.locator('#operation-caption').innerText();
+ const pointCount=s=>Number(s.split(' pontos')[0].replaceAll('.',''));
+ assert.ok(pointCount(exact)>0,'A single SUB must show mapped points');
+ assert.ok(pointCount(range)>pointCount(exact),'The inclusive interval must add points from other SUBs');
+ await page.evaluate(()=>{let layer;testApi.map.eachLayer(l=>{if(!layer&&l.options?.fillColor==='#0037dd')layer=l});if(!layer)throw Error('Filtered point layer absent');layer.fire('click',{latlng:layer.getLatLng()})});
+ await expectText('#modal','SUB 74–98');
+ assert.equal(await page.locator('#location-scope').inputValue(),'selected');
+ await close();
+ await page.selectOption('#geo-sub-from','');
+ assert.equal(await page.locator('#geo-sub-to').inputValue(),'');
  // SB interior click uses the same modal and an actual coordinate from the line.
  await page.evaluate(()=>{let layer;testApi.map.eachLayer(l=>{if(!layer&&l.options?.color==='#007fa6')layer=l});if(!layer)throw Error('SB layer absent');layer.fire('click',{latlng:layer.getLatLngs()[0]})});
  await expectText('#modal','Segmento de SB');await close();
@@ -99,5 +120,5 @@ try{
  await page.screenshot({path:path.join(output,'mobile-modal.png')});await close();
  await page.click('[data-tab="pn"]');await expectText('#catalog-table','Passagem de nível');
  assert.deepEqual(errors,[]);
- console.log('PASS: historical drawing, unified modal, radius, selected layers, preserved malha, PN/SB clicks, records, ambiguous/unlocated references and mobile layout.');
+ console.log('PASS: historical drawing, unified modal, single SUB and inclusive interval, selected layers, preserved malha, PN/SB clicks, records, ambiguous/unlocated references and mobile layout.');
 }finally{await browser?.close();await new Promise(r=>server.close(r))}

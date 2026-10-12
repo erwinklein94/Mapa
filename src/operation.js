@@ -1,4 +1,5 @@
 import {MALHAS,malhaForPoint,malhaForLine} from './malhas.js';
+import {subMatches,subLabel} from './subs.js';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -12,9 +13,9 @@ const option=(value,text,selected)=>`<option value="${esc(value)}" ${value===sel
 let mapMode='drawing',selectedCatalogId='',geographicState={};
 let recordTab='locations',recordQuery='',recordSection='',recordPage=0,recordKind='';
 
-export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSegments,pnPoints,stations,malhaIndex,onPoint,onInspect,onAdd,onRecords,onMap,onPresentation,focus}){
+export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSegments,pnPoints,stations,malhaIndex,subOptions=[],onPoint,onInspect,onAdd,onRecords,onMap,onPresentation,focus}){
  let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,hitLayer,pointCanvas,tile,adding=false,query='',showHits=false;
- let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',baseMode='street'}=geographicState;
+ let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',subFrom='',subTo='',baseMode='street'}=geographicState;
  catalog=catalogs.find(c=>c.id===(focus?.catalogId||selectedCatalogId))||catalog;
  let currentPoints=points;
  const locatedStations=stations.filter(s=>Number.isFinite(s.lat)&&Number.isFinite(s.lng));
@@ -24,19 +25,22 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
  const sbCode=s=>{if(!sbMalhas.has(s))sbMalhas.set(s,malhaForLine(malhaIndex,s.coordinates));return sbMalhas.get(s)};
  const stationCode=s=>{if(!stationMalhas.has(s))stationMalhas.set(s,malhaForPoint(malhaIndex,s.lat,s.lng));return stationMalhas.get(s)};
  const inMalha=code=>!malha||code===malha;
+ const inSub=item=>subMatches(item.subCodes,subFrom,subTo);
  const $=s=>root.querySelector(s);
  const fullBox=()=>[0,0,catalog.width,catalog.height];
  const sourcePath=()=>`${catalog.assetBase}/source.pdf`;
- const inspect=(reference,useFilters=true)=>onInspect(reference,useFilters&&mapMode==='geographic'?{layers:{points:showPoints,sb:showSB,pn:showPN,stations:showStations},malha,kind,line}:undefined);
+ const inspect=(reference,useFilters=true)=>onInspect(reference,useFilters&&mapMode==='geographic'?{layers:{points:showPoints,sb:showSB,pn:showPN,stations:showStations},malha,kind,line,subFrom,subTo}:undefined);
  const selectFilter=(id,label,choices,value,swatch='')=>`<label class="geo-filter" for="${id}"><span class="geo-filter-label">${swatch}${label}</span><select id="${id}">${choices.map(([v,t])=>option(v,t,value)).join('')}</select></label>`;
  const showHide=(id,label,shown,swatch='')=>selectFilter(id,label,[['off','Ocultar'],['on','Mostrar']],shown?'on':'off',swatch);
  function geographicControls(){
   const pointTypes=[...new Set(currentPoints.map(p=>p.kind))].sort();
   return `<div class="layer-section geo-controls"><h3>Filtrar</h3>
    ${selectFilter('geo-malha','Malha ferroviária',[['','Todas as malhas'],...MALHAS.map(m=>[m.code,m.name])],malha)}
+   ${selectFilter('geo-sub-from','SUB inicial',[['','Todas as SUBs'],...subOptions.map(n=>[n,`SUB ${n}`])],subFrom)}
+   ${selectFilter('geo-sub-to','SUB final (opcional)',[['','Somente a SUB inicial'],...subOptions.map(n=>[n,`SUB ${n}`])],subTo)}
    ${selectFilter('geo-kind','Tipo dos pontos',[['','Todos os tipos'],...pointTypes.map(k=>[k,k])],kind)}
    ${selectFilter('geo-line','Linha dos pontos',[['','Todos os tipos de linha'],...['Não classificada','Singela','Dupla','Desviada'].map(k=>[k,k])],line)}
-   <p class="panel-note">A malha selecionada filtra todas as camadas e enquadra os resultados.</p></div>
+   <p class="panel-note">Para uma SUB, escolha apenas a inicial. Para um intervalo, escolha também a final; as duas entram no recorte. A malha e a SUB atuam juntas.</p><p class="panel-note">Estações e PN com SUB explícita usam a fonte. Demais associações por estação próxima são estimativas; locais sem SUB identificada só aparecem em “Todas as SUBs”.</p></div>
    <div class="layer-section geo-controls"><h3>Exibir no mapa</h3>
    ${showHide('geo-points','Pontos e cadastros',showPoints,'<i class="dot"></i>')}
    ${showHide('geo-sb','SB do KML',showSB,'<i class="sb-swatch"></i>')}
@@ -56,7 +60,8 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
    <p class="panel-note">${esc(catalog.notice||catalog.sourceStatus||'As cores, limites e conexões são preservados do documento original.')}</p></div>`;
  }
 
- function stop(){geographicState={showPoints,showSB,showPN,showStations,showNames,kind,line,malha,baseMode};observer?.disconnect();map?.stop();map?.remove();map=null}
+ function disposePointCanvas(){if(!pointCanvas)return;L.Util.cancelAnimFrame(pointCanvas._redrawRequest);pointCanvas._redrawRequest=null;if(map?.hasLayer(pointCanvas))map.removeLayer(pointCanvas);pointCanvas=null}
+ function stop(){geographicState={showPoints,showSB,showPN,showStations,showNames,kind,line,malha,subFrom,subTo,baseMode};observer?.disconnect();disposePointCanvas();map?.stop();map?.remove();map=null}
  function shell(){
   stop();adding=false;showHits=false;selectedCatalogId=catalog.id;
   root.innerHTML=`<div class="map-layout operation-layout"><aside class="map-panel operation-panel"><div class="eyebrow">REDE FERROVIÁRIA</div><h2>Mapa de operação</h2><p class="source-date">${mapMode==='drawing'?`Base SIV · ${esc(catalog.sourceDate)} · prancha completa`:'Consulta integrada · pontos, PN, SB e estações'}</p><div class="view-switch"><button data-mode="drawing" class="${mapMode==='drawing'?'active':''}">Prancha interativa</button><button data-mode="geographic" class="${mapMode==='geographic'?'active':''}">Mapa geográfico</button></div><label class="search-label" for="operation-search">Buscar na ${mapMode==='drawing'?'prancha':'malha'}</label><input id="operation-search" class="search" type="search" placeholder="${mapMode==='drawing'?'Nome, sigla, KM ou SUB':'Nome, sigla, KM, SB ou estação'}" value="${esc(query)}"><div id="operation-results" class="results" aria-live="polite"></div>${mapMode==='drawing'?drawingControls():geographicControls()}<div class="map-source-links"><button id="all-records">Consultar registros</button><a href="${sourcePath()}" target="_blank" rel="noopener">Abrir PDF original ↗</a>${mapMode==='geographic'?'<a href="assets/rail-stations.json" download>Baixar tabela de estações ↧</a>':''}</div></aside><section class="map-wrap" aria-label="${mapMode==='drawing'?'Prancha operacional interativa':'Mapa geográfico da malha completa'}"><div id="map"></div><div class="map-toolbar"><div class="row"><button id="layers-mobile" class="mobile-brand">Explorar</button><button id="operation-fit">Enquadrar mapa</button></div><div class="row"><button id="exit-present" class="present-only">Sair da apresentação</button>${mapMode==='geographic'?'<button id="add-map" class="primary">+ Novo ponto</button>':''}</div></div><div class="map-caption" id="operation-caption"></div><div class="drawing-hint" ${mapMode==='drawing'?'':'hidden'}>Role para ampliar · Arraste para navegar · Clique nos rótulos</div></section></div>`;
@@ -66,7 +71,7 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
   $('#all-records').onclick=()=>onRecords();
   $('#layers-mobile').onclick=()=>$('.map-panel').classList.toggle('open');
   $('#exit-present').onclick=()=>onPresentation(false);
-  map=L.map('map',{crs:mapMode==='drawing'?L.CRS.Simple:L.CRS.EPSG3857,minZoom:mapMode==='drawing'?-3:2,maxZoom:mapMode==='drawing'?4:19,preferCanvas:true,zoomAnimation:false,zoomControl:false,attributionControl:mapMode!=='drawing'});
+  map=L.map('map',{crs:mapMode==='drawing'?L.CRS.Simple:L.CRS.EPSG3857,minZoom:mapMode==='drawing'?-3:2,maxZoom:mapMode==='drawing'?4:19,preferCanvas:true,renderer:new SafeCanvas({padding:.5,tolerance:3}),zoomAnimation:false,zoomControl:false,attributionControl:mapMode!=='drawing'});
   onMap(map);
   L.control.zoom({position:'topright'}).addTo(map);
   if(mapMode==='drawing'){
@@ -74,7 +79,7 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
    L.tileLayer(`${catalog.assetBase}/tiles/{z}/{x}/{y}.png`,{tileSize:catalog.tileSize,minZoom:-3,maxZoom:4,minNativeZoom:0,maxNativeZoom:catalog.maxNativeZoom,noWrap:true,bounds,keepBuffer:2}).addTo(map);
    map.setMaxBounds(bounds.pad(.15));
    hitLayer=L.featureGroup().addTo(map);
-   const renderer=L.canvas({padding:.5,tolerance:3});
+   const renderer=new SafeCanvas({padding:.5,tolerance:3});
    catalog.items.forEach(item=>{
     const rect=L.rectangle(boundsFor(L,item.box),{renderer,color:item.category==='SUB'?'#e32028':'#0075dc',weight:0,opacity:0,fillOpacity:0});
     rect.on('mouseover',()=>rect.setStyle({weight:1,opacity:.8,fillOpacity:.16}));
@@ -90,7 +95,11 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
   }else{
    setBase(baseMode);L.control.scale({imperial:false,position:'bottomright'}).addTo(map);
    pointLayer=L.layerGroup().addTo(map);sbLayer=L.featureGroup().addTo(map);pnLayer=L.layerGroup().addTo(map);stationLayer=L.layerGroup().addTo(map);
-   $('#geo-malha').onchange=e=>{malha=e.target.value;if(malha){showPoints=showSB=showPN=showStations=true;kind=line='';for(const id of ['geo-points','geo-sb','geo-pn','geo-stations'])$('#'+id).value='on';$('#geo-kind').value=$('#geo-line').value=''}drawGeo();search();fit()};
+   $('#geo-sub-to').disabled=!subFrom;
+   const activateLayers=()=>{showPoints=showSB=showPN=showStations=true;for(const id of ['geo-points','geo-sb','geo-pn','geo-stations'])$('#'+id).value='on'};
+   $('#geo-malha').onchange=e=>{malha=e.target.value;if(malha){activateLayers();kind=line='';$('#geo-kind').value=$('#geo-line').value=''}drawGeo();search();fit()};
+   $('#geo-sub-from').onchange=e=>{subFrom=e.target.value;if(!subFrom){subTo='';$('#geo-sub-to').value=''}$('#geo-sub-to').disabled=!subFrom;if(subFrom)activateLayers();drawGeo();search();fit()};
+   $('#geo-sub-to').onchange=e=>{subTo=e.target.value;if(subFrom)activateLayers();drawGeo();search();fit()};
    for(const [id,update] of [['geo-points',v=>showPoints=v],['geo-sb',v=>showSB=v],['geo-pn',v=>showPN=v],['geo-stations',v=>showStations=v],['geo-names',v=>showNames=v]])$('#'+id).onchange=e=>{update(e.target.value==='on');drawGeo()};
    $('#geo-kind').onchange=e=>{kind=e.target.value;drawGeo();search()};
    $('#geo-line').onchange=e=>{line=e.target.value;drawGeo();search()};
@@ -105,18 +114,21 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
  function fit(){
   if(mapMode==='drawing'){map.fitBounds(boundsFor(L,fullBox()),{padding:[15,15]});return}
   const bounds=L.latLngBounds([]);
-  const visiblePoints=currentPoints.filter(p=>inMalha(pointCode(p))&&(!kind||p.kind===kind)&&(!line||p.line_type===line));
-  const visibleSB=sbSegments.filter(s=>inMalha(sbCode(s)));
-  const visiblePN=pnPoints.filter(p=>inMalha(pnCode(p)));
-  const visibleStations=locatedStations.filter(s=>inMalha(stationCode(s)));
+  const visiblePoints=currentPoints.filter(p=>inMalha(pointCode(p))&&inSub(p)&&(!kind||p.kind===kind)&&(!line||p.line_type===line));
+  const visibleSB=sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s));
+  const visiblePN=pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p));
+  const visibleStations=locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s));
   if(showPoints)visiblePoints.forEach(p=>bounds.extend([p.lat,p.lng]));
   if(showSB)visibleSB.forEach(s=>s.coordinates.forEach(([lng,lat])=>bounds.extend([lat,lng])));
   if(showPN)visiblePN.forEach(p=>bounds.extend([p.lat,p.lng]));
   if(showStations)visibleStations.forEach(s=>bounds.extend([s.lat,s.lng]));
-  if(!bounds.isValid())currentPoints.forEach(p=>bounds.extend([p.lat,p.lng]));
+  if(!bounds.isValid()&&!subFrom&&!malha)currentPoints.forEach(p=>bounds.extend([p.lat,p.lng]));
   if(bounds.isValid())map.fitBounds(bounds,{padding:[30,30]});
  }
-const NamedPointsCanvas=L.Canvas.extend({
+const SafeCanvas=L.Canvas.extend({
+ _redraw(){if(!this._ctx)return;L.Canvas.prototype._redraw.call(this)}
+});
+const NamedPointsCanvas=SafeCanvas.extend({
  _updateCircle(layer){
   L.Canvas.prototype._updateCircle.call(this,layer);
   if(!this._drawing||layer._empty()||!layer.options.pointName)return;
@@ -135,19 +147,19 @@ const NamedPointsCanvas=L.Canvas.extend({
  }
  function drawGeo(){
   if(mapMode!=='geographic')return;
-  pointLayer.clearLayers();sbLayer.clearLayers();pnLayer.clearLayers();stationLayer.clearLayers();if(pointCanvas&&map.hasLayer(pointCanvas))map.removeLayer(pointCanvas);pointCanvas=new NamedPointsCanvas({padding:.5,tolerance:8});let n=0;
-  if(showSB)sbSegments.filter(s=>inMalha(sbCode(s))).forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)inspect({type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng})}).addTo(sbLayer));
-  if(showPoints)currentPoints.forEach(p=>{if(!inMalha(pointCode(p))||(kind&&p.kind!==kind)||(line&&p.line_type!==line))return;n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'point',id:p.id})}).addTo(pointLayer)});
-  if(showPN)pnPoints.filter(p=>inMalha(pnCode(p))).forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'pn',id:p.id})}).addTo(pnLayer));
-  if(showStations)locatedStations.filter(s=>inMalha(stationCode(s))).forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)inspect({type:'station',id:s.code})}).addTo(stationLayer));
-  $('#operation-caption').textContent=`${fmt(n)} pontos · ${showSB?fmt(sbSegments.filter(s=>inMalha(sbCode(s))).length):'0'} SB · ${showPN?fmt(pnPoints.filter(p=>inMalha(pnCode(p))).length):'0'} PN · ${showStations?fmt(locatedStations.filter(s=>inMalha(stationCode(s))).length):'0'} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}`;
+  pointLayer.clearLayers();sbLayer.clearLayers();pnLayer.clearLayers();stationLayer.clearLayers();disposePointCanvas();pointCanvas=new NamedPointsCanvas({padding:.5,tolerance:8});let n=0;
+  if(showSB)sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)).forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)inspect({type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng})}).addTo(sbLayer));
+  if(showPoints)currentPoints.forEach(p=>{if(!inMalha(pointCode(p))||!inSub(p)||(kind&&p.kind!==kind)||(line&&p.line_type!==line))return;n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'point',id:p.id})}).addTo(pointLayer)});
+  if(showPN)pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)).forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'pn',id:p.id})}).addTo(pnLayer));
+  if(showStations)locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)).forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)inspect({type:'station',id:s.code})}).addTo(stationLayer));
+  $('#operation-caption').textContent=`${fmt(n)} pontos · ${showSB?fmt(sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)).length):'0'} SB · ${showPN?fmt(pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)).length):'0'} PN · ${showStations?fmt(locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)).length):'0'} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}${subFrom?` · ${subLabel(subFrom,subTo)}`:''}`;
  }
  function search(){
   const q=query.trim();if(!q){$('#operation-results').innerHTML='';return}
-  const rows=mapMode==='drawing'?catalog.items.filter(i=>matches(i,q)):currentPoints.filter(p=>inMalha(pointCode(p))&&(!kind||p.kind===kind)&&(!line||p.line_type===line)&&pointMatches(p,q));
-  const sbRows=mapMode==='geographic'?sbSegments.filter(s=>inMalha(sbCode(s))&&norm(`SB ${s.id} ${s.km_start} ${s.km_end}`).includes(norm(q))):[];
-  const pnRows=mapMode==='geographic'?pnPoints.filter(p=>inMalha(pnCode(p))&&norm(`${p.name} ${p.km} ${p.place} ${p.uf} ${p.section}`).includes(norm(q))):[];
-  const stationRows=mapMode==='geographic'?locatedStations.filter(s=>inMalha(stationCode(s))&&norm(`${s.name} ${s.code} ${s.records.map(r=>`${r.km} ${r.sub}`).join(' ')}`).includes(norm(q))):[];
+  const rows=mapMode==='drawing'?catalog.items.filter(i=>matches(i,q)):currentPoints.filter(p=>inMalha(pointCode(p))&&inSub(p)&&(!kind||p.kind===kind)&&(!line||p.line_type===line)&&pointMatches(p,q));
+  const sbRows=mapMode==='geographic'?sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)&&norm(`SB ${s.id} ${s.km_start} ${s.km_end}`).includes(norm(q))):[];
+  const pnRows=mapMode==='geographic'?pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)&&norm(`${p.name} ${p.km} ${p.place} ${p.uf} ${p.section}`).includes(norm(q))):[];
+  const stationRows=mapMode==='geographic'?locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)&&norm(`${s.name} ${s.code} ${s.records.map(r=>`${r.km} ${r.sub}`).join(' ')}`).includes(norm(q))):[];
   const total=rows.length+sbRows.length+pnRows.length+stationRows.length;
   const visible=[...stationRows.map(item=>({item,type:'station'})),...rows.map(i=>({item:i,type:mapMode==='drawing'?'pdf':'point'})),...sbRows.map(item=>({item,type:'sb'})),...pnRows.map(item=>({item,type:'pn'}))].slice(0,40);
   $('#operation-results').innerHTML=visible.length?`<p class="results-total">${fmt(total)} resultados${total>40?' · primeiros 40':''}</p>${visible.map((r,i)=>`<button class="result" data-result="${i}">${esc(r.type==='pdf'?label(r.item):r.type==='sb'?`SB ${r.item.id}`:r.item.name)}<br><small>${esc(r.type==='pdf'?sectionName(catalog,r.item.section):r.type==='point'?r.item.kind:r.type==='pn'?`PN · ${r.item.place||r.item.section||r.item.km||'Passagem de nível'}`:r.type==='station'?`Estação ${r.item.code} · ${r.item.records.length} registro(s)`:`KM ${r.item.km_start} → ${r.item.km_end}`)}</small></button>`).join('')}`:'<p class="muted">Nenhum resultado.</p>';

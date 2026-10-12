@@ -1,4 +1,5 @@
 import {malhaForPoint,malhaForLine} from './malhas.js';
+import {subMatches} from './subs.js';
 
 const EARTH_RADIUS=6371008.8;
 const radians=value=>value*Math.PI/180;
@@ -180,6 +181,7 @@ export function createLocationContext({points=[],sbSegments=[],pnPoints=[],stati
    const distanceMeters=coordinate.distanceMeters??distance(origin,coordinate);
    if(distanceMeters>radius)return;
    if(filters.malha&&malhaFor(item,type)!==filters.malha)return;
+   if(!subMatches(item.subCodes,filters.subFrom,filters.subTo))return;
    const reference={type,id,...(type==='sb'?{lat:coordinate.lat,lng:coordinate.lng}:{})};
    results.push({type,id,title,lat:coordinate.lat,lng:coordinate.lng,distanceMeters,item,reference});
   }
