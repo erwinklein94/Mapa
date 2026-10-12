@@ -3,7 +3,7 @@ import {writeFile} from 'node:fs/promises';
 const endpoint='https://geo.infrasa.gov.br/server/rest/services/Hosted/Concess%C3%B5es_ferrovi%C3%A1rias_em_Opera%C3%A7%C3%A3o/FeatureServer/13/query';
 const codes=['RMN','RMO','RMP','RMS','RMC'];
 const url=new URL(endpoint);
-url.search=new URLSearchParams({where:`vhr_ferrov IN (${codes.map(code=>`'${code}'`).join(',')})`,outFields:'objectid,vhr_ferrov',returnGeometry:'true',outSR:'4326',f:'geojson'});
+url.search=new URLSearchParams({where:`vhr_ferrov IN (${codes.map(code=>`'${code}'`).join(',')})`,outFields:'objectid,vhr_ferrov,vhr_siglap,vhr_sigl_1',returnGeometry:'true',outSR:'4326',f:'geojson'});
 
 function simplify(points,tolerance=.00025){
   if(points.length<=2)return points;
@@ -26,13 +26,18 @@ const response=await fetch(url);
 if(!response.ok)throw Error(`Infra S.A.: HTTP ${response.status}`);
 const geojson=await response.json();
 if(geojson.error||geojson.properties?.exceededTransferLimit)throw Error('Consulta incompleta à Infra S.A.');
+const stationAnchors=[];
 const lines=geojson.features.map(feature=>{
   const code=feature.properties.vhr_ferrov;
   if(!codes.includes(code))throw Error(`Malha inesperada: ${code}`);
   const geometry=feature.geometry;
-  const paths=(geometry.type==='MultiLineString'?geometry.coordinates:[geometry.coordinates]).map(path=>simplify(path)).filter(path=>path.length>=2);
+  const rawPaths=geometry.type==='MultiLineString'?geometry.coordinates:[geometry.coordinates];
+  const paths=rawPaths.map(path=>simplify(path)).filter(path=>path.length>=2);
+  for(const [stationCode,coord] of [[feature.properties.vhr_siglap,rawPaths[0]?.[0]],[feature.properties.vhr_sigl_1,rawPaths.at(-1)?.at(-1)]]){
+    if(stationCode&&coord)stationAnchors.push({code:stationCode.trim(),lat:Number(coord[1].toFixed(6)),lng:Number(coord[0].toFixed(6))});
+  }
   return {code,paths};
 }).filter(line=>line.paths.length);
 if(lines.length<500)throw Error(`Quantidade inesperada de trechos: ${lines.length}`);
-await writeFile('dist/assets/rail-malhas.json',JSON.stringify({source:'Infra S.A. / ANTT, Declaração de Rede 2024',lines}));
-console.log(`Imported ${lines.length} concession sections`);
+await writeFile('dist/assets/rail-malhas.json',JSON.stringify({source:'Infra S.A. / ANTT, Declaração de Rede 2024',lines,stationAnchors}));
+console.log(`Imported ${lines.length} concession sections and ${stationAnchors.length} station anchors`);
