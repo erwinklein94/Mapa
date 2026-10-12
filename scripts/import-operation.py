@@ -9,6 +9,7 @@ from collections import Counter
 import xml.etree.ElementTree as ET
 import pypdfium2 as pdfium
 from PIL import Image
+from drawing_context import attach_station_context
 
 root=Path(__file__).resolve().parent.parent
 source=Path(sys.argv[1])
@@ -40,6 +41,7 @@ for obj in page.get_objects(filter=[pdfium.raw.FPDF_PAGEOBJ_TEXT],textpage=textp
     elif 'DETALHE' in text.upper(): category='Detalhes'
     section=next((d['id'] for d in details if d['box'][0]<=(box[0]+box[2])/2<=d['box'][2] and d['box'][1]<=(box[1]+box[3])/2<=d['box'][3]),'general')
     items.append({'id':f'pdf-{len(items)+1:04d}','text':text,'box':box,'codes':codes,'category':category,'section':section})
+attach_station_context(items)
 subs=sorted({i['text'] for i in items if i['category']=='SUB'},key=int)
 manifest={'title':'Mapa de Operação Rumo','source':'MAPA_OPERAÇÃO.pdf','sourceDate':'DEZ-2023','sourceBase':'SIV','sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'width':width,'height':height,'tileSize':512,'maxNativeZoom':2,'details':details,'subs':subs,'items':items,'counts':dict(Counter(i['category'] for i in items))}
 (out/'catalog.json').write_text(json.dumps(manifest,ensure_ascii=False,separators=(',',':')),encoding='utf-8')

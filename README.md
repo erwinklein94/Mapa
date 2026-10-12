@@ -26,9 +26,12 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - Na página Mapa, "Modo Apresentação" coloca a página em tela cheia e esconde a barra lateral, o topo e o painel de camadas, que abre pelo botão "Camadas". Para sair, use "Sair da apresentação" ou Esc.
 - O botão de sol/lua alterna entre tema claro e escuro. A página sempre abre no tema claro. No tema escuro, a base "Ruas" é escurecida por filtro CSS.
 - A página Mapa abre na **Prancha interativa**, sem seleção de SUB, tipo de registro ou tipo de linha. A prancha mantém as cores, símbolos, limites, conexões, setas e notas do PDF original. Zoom, arraste, busca, seleção de SUB e sete atalhos de detalhes permitem navegar pelo documento.
-- Clicar em um rótulo abre sua referência e o atalho para Registros. A busca aceita nomes, siglas, KMs e números de SUB. Cada ocorrência tem posição própria, inclusive quando a mesma localidade aparece em mais de um detalhe.
+- O seletor **Documento** alterna entre a prancha de dezembro/2023 e a prancha histórica Rumo/ALL de junho/2015. Documento, SUB, detalhe e destaque dos rótulos usam seletores padronizados. A busca aceita nomes, siglas, KMs e números de SUB, inclusive os KMs anexos à caixa de uma estação.
+- Clicar em um rótulo, ponto, PN, estação ou SB abre a **Consulta integrada**. O modal reúne dados do local, KMs, informações próximas por distância, referências das duas pranchas, coordenadas e links para o Google Maps. O raio varia de 250 m a 10 km; é possível consultar as camadas selecionadas no mapa ou todas as informações. Para segmentos SB, usa a menor distância até o traçado. Os resultados têm paginação e detalhes expansíveis.
+- Na prancha, a localização é vinculada por sigla exata a uma estação georreferenciada ou a um ponto do KMZ. Rótulos ambíguos e SUB oferecem escolhas de locais. Anotações sem localização verificada continuam consultáveis, com a fonte original, sem coordenada ou link inventado. As posições gráficas da prancha não são usadas como latitude/longitude. O mapa geográfico também permite consultar uma coordenada livre, clicando no fundo fora do modo de adicionar ponto.
 - **Mapa geográfico** oferece camadas independentes para os pontos do KMZ, as SB do KML, as PN do arquivo `Pns.zip` e as estações do PDF de 2015. Todas começam desligadas. Malha, tipo de registro, tipo de linha, camadas, nomes e base cartográfica usam o mesmo padrão de seletor no painel. O filtro de malha permite escolher Norte, Oeste, Paulista, Sul ou Central: ao selecionar uma, as quatro camadas são ativadas e só aparecem os elementos atribuídos à concessão escolhida. A busca e o enquadramento seguem a mesma escolha.
-- Registros possui cinco abas: **Localidades e KMs**, **SUB**, **SB**, **Pontos e cadastros**, **Notas e conexões**. Há busca, paginação, seleção da área do PDF, exportação CSV e navegação até a informação no mapa. Nos cadastros, siglas idênticas às do PDF oferecem atalhos para suas referências na prancha.
+- Registros possui sete abas: **Localidades e KMs**, **SUB**, **SB**, **Pontos e cadastros**, **Passagens de nível**, **Estações** e **Notas e conexões**. Há busca, seletores de fonte/data, categoria e área, paginação, exportação CSV de todos os resultados filtrados e navegação para o mapa ou para o mesmo modal de consulta. As estações sem coordenadas permanecem nesta tabela. A edição de cadastros e fotos continua acessível pelo modal e pela aba de pontos.
+- As camadas geográficas iniciam desligadas a cada abertura do site. Durante a sessão, as escolhas de malha, camadas e base são preservadas ao navegar entre mapas, modal e registros.
 
 ## Fontes e cobertura
 
@@ -50,6 +53,21 @@ python scripts/verify-operation.py "CAMINHO_DO_Ferrovia SB.kml"
 npm run build
 ```
 
+### Prancha histórica Rumo / ALL 2015
+
+O documento `Mapa Rumo_ALL_2015-52X74cm.pdf` tem uma prancha com atualização SIV em **26/06/2015** e a observação **Mapa em revisão**. Foi incorporado como fonte histórica; suas diferenças não substituem automaticamente o cadastro nem os dados de 2023.
+
+O catálogo em `dist/assets/operation-2015` preserva **1.421 objetos de texto**, **664 siglas**, **80 números de SUB**, cinco quadros de detalhe e a imagem integral em 688 blocos PNG. Inclui 898 objetos de localidades/KMs, 242 quilometragens, 120 conexões, 65 notas, dez títulos de detalhe e 86 ocorrências de SUB. Em comparação às siglas do catálogo de 2023, há três adicionais: **TPD** (Pátio de Dormentes), **TPO** (Term. da Ponte) e **ZSP** (S. José do Rio Preto).
+
+Foram recuperados os mapas de caracteres de quatro fontes incorporadas para extrair corretamente acentos e setas, sem alterar o PDF servido. As linhas imediatamente abaixo e alinhadas ao título de uma estação são preservadas também em `contextText`, com os KMs por sentido e os IDs dos textos de origem; as linhas associadas guardam `anchorCodes`. Todos os textos originais continuam como registros separados e clicáveis. O PDF, o hash de origem e a data ficam disponíveis para conferência.
+
+Para reproduzir (Python com `pypdfium2`, `Pillow` e `pypdf`):
+
+```powershell
+python scripts/import-rumo-2015.py "CAMINHO_DO_Mapa Rumo_ALL_2015-52X74cm.pdf"
+python scripts/verify-rumo-2015.py
+```
+
 ### Malha geográfica
 
 Os **10.444 pontos** do KMZ original foram restaurados, com os mesmos IDs e coordenadas, para incluir toda a malha. O arquivo não contém linhas ferroviárias; não são criadas ligações artificiais entre seus pontos. Alterações e cadastros da equipe continuam sendo mesclados por ID com os dados do banco.
@@ -69,6 +87,10 @@ Para reconverter o KMZ: `pwsh scripts/import-kmz.ps1 -InputFile "CAMINHO_DO_KMZ_
 Base de ruas: OpenStreetMap. Base de terreno: Esri World Topographic Map, com atribuições no mapa. As bases dependem de conexão e disponibilidade dos provedores.
 
 ## Verificação
+
+`node scripts/verify-location-context.mjs` verifica associações por sigla, ambiguidades, raio, filtros de camadas/malhas, distância ao interior das SB e ausência de coordenadas inventadas. `node scripts/verify-records.mjs` verifica consulta entre fontes, PN, estações sem localização e exportação dos 818 registros SIV. `python scripts/verify-rumo-2015.py` compara textos recuperados e amostras dos blocos de imagem com o PDF original.
+
+`node scripts/verify-map-ui.mjs` executa a integração em navegador local usando os módulos reais e uma página temporária, sem acessar autenticação ou banco. Requer Playwright disponível por módulo ou `MAPA_PLAYWRIGHT_PATH` e Edge no Windows (Chromium nos demais sistemas). Verifica seleção de fonte, cliques PN/SB, modal, raio, filtros preservados, registros, ambiguidades, coordenadas ausentes e layout móvel. Capturas ficam em `.tmp/map-ui` e não são publicadas.
 
 `scripts/verify.mjs` testa coordenadas e contagem do KMZ, login, criação de conta, CRUD de ponto, fotos privadas, auditoria e bloqueios de privilégio. Requer `TEST_EMAIL` e `TEST_PASSWORD` via ambiente. Cria um usuário temporário e imprime apenas seu ID para remoção administrativa após a execução. Não salva credenciais.
 

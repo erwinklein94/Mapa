@@ -23,6 +23,14 @@ assert len(items)==len({i['id'] for i in items})==1512
 assert dict(Counter(i['category'] for i in items))==catalog['counts']
 assert {i['text'] for i in items if i['category']=='SUB'}==set(catalog['subs'])
 assert len(catalog['subs'])==91
+tag=next(i for i in items if i['text']=='ALTO ARAGUAIA(TAG)')
+assert tag['contextText']=='ALTO ARAGUAIA(TAG)\n← TRO km 497,900\n↓ TMI km 497,500'
+by_id={i['id']:i for i in items}
+for item in items:
+    for related_id in item.get('relatedIds',[]):
+        related=by_id[related_id]
+        assert related['anchorId']==item['id'] and related['anchorCodes']==item['codes']
+        assert related['contextText']==item['contextText']
 sections={'general',*[d['id'] for d in catalog['details']]}
 assert len(sections)==8
 for i in items:
