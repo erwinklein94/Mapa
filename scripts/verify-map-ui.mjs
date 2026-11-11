@@ -30,7 +30,7 @@ const fixture=`
  const context=createLocationContext(data),root=document.querySelector('#content');let view,map;
  function dialog(title,body){const d=document.querySelector('#modal');d.classList.remove('location-dialog');d.innerHTML='<div class="modal-head"><h2></h2><button class="close" aria-label="Fechar">×</button></div><div class="modal-body">'+body+'</div>';d.querySelector('h2').textContent=title;d.querySelector('.close').onclick=()=>d.close();if(!d.open)d.showModal()}
  function inspect(reference,filters){openLocationDetails({reference,context,filters,dialog,onEdit:p=>{window.lastEdit=p.id;dialog('Editar cadastro','Formulário existente')},onMap:mountMap})}
- function mountMap(focus){view?.destroy();view=mountOperationMap({L,root,...data,catalog:catalogs[0],focus,onInspect:inspect,onPoint:p=>inspect({type:'point',id:p.id}),onMap:m=>map=m,onRecords:mountRecords,onPresentation:()=>{},onAdd:()=>{}})}
+ function mountMap(focus,overrides={}){view?.destroy();view=mountOperationMap({L,root,...data,catalog:catalogs[0],focus,onInspect:inspect,onPoint:p=>inspect({type:'point',id:p.id}),onMap:m=>map=m,onRecords:mountRecords,onPresentation:()=>{},onAdd:()=>{},...overrides})}
  function mountRecords(focus){view?.destroy();view=null;mountOperationRecords({root,...data,catalog:catalogs[0],focus,onInspect:inspect,onMap:mountMap,onPoint:p=>{window.lastEdit=p.id},onAdd:()=>{}})}
  document.querySelector('#test-records').onclick=()=>mountRecords();document.querySelector('#test-map').onclick=()=>mountMap();
  window.testApi={data,context,inspect,mountMap,mountRecords,get map(){return map}};mountMap();window.ready=true;
@@ -113,12 +113,66 @@ try{
  // A multi-code drawing reference asks for a choice instead of inventing a midpoint.
  await page.evaluate(()=>{const c=testApi.data.catalogs[0],item=c.items.find(i=>i.codes.includes('JBU')&&i.codes.includes('ZBU'));if(!item)throw Error('Ambiguous Bauru reference missing');testApi.inspect({type:'pdf',id:item.id,catalogId:c.id})});
  await expectText('#modal','Escolha a localização');assert.equal(await page.locator('.location-origin .maps-link').count(),0);
- await page.locator('[data-location-candidate]').first().click();assert.equal(await page.locator('.location-origin .maps-link').count(),1);await close();
+ await page.locator('[data-location-candidate]').first().click();assert.equal(await page.locator('.location-origin .directions-link').count(),1);assert.equal(await page.locator('.location-origin .maps-link:not(.directions-link)').count(),1);await close();
  await page.setViewportSize({width:390,height:844});
  await page.evaluate(()=>testApi.inspect({type:'station',id:'TAG'}));
  assert.equal(await page.locator('#modal').evaluate(d=>d.scrollWidth<=d.clientWidth),true,'Modal must fit mobile width');
  await page.screenshot({path:path.join(output,'mobile-modal.png')});await close();
  await page.click('[data-tab="pn"]');await expectText('#catalog-table','Passagem de nível');
+ // Deterministic result set: check all pages against the actual map layers and bounds.
+ await page.setViewportSize({width:1440,height:1000});
+ await page.reload();await page.waitForFunction(()=>window.ready);
+ await page.evaluate(()=>{
+  const points=Array.from({length:85},(_,i)=>({id:'test-'+i,name:'Local '+String(i).padStart(2,'0'),yard:'TEST',source_km:String(i),lat:-23-i*.01,lng:-46-i*.01,kind:i%2?'Pátio':'AMV',line_type:i%2?'Dupla':'Singela',subCodes:[i<45?'74':'75']}));
+  window.stagePoints=points;
+  testApi.mountMap(undefined,{points,sbSegments:[{id:'TEST',coordinates:[[-46,-23],[-46.1,-23.1]],subCodes:['74']}],pnPoints:[{id:'test-pn',name:'Travessia especial',lat:-23,lng:-46,subCodes:['74']}],stations:[],onInspect:ref=>window.lastInspect=ref});
+ });
+ await page.click('[data-mode="geographic"]');
+ await expectText('#operation-results','Nenhuma camada ativada');
+ assert.equal(await page.locator('#operation-fit').isDisabled(),true);
+ await page.selectOption('#geo-points','on');
+ const markerCount=()=>page.evaluate(()=>{let n=0;testApi.map.eachLayer(l=>{if(l.options?.fillColor==='#0037dd')n++});return n});
+ assert.equal(await markerCount(),85);await expectText('.results-total','85 resultados');
+ const seen=[];
+ for(let pageNumber=0;pageNumber<3;pageNumber++){
+  seen.push(...await page.locator('[data-result]').allTextContents());
+  assert.equal(await markerCount(),85,'Changing list page must not remove map results');
+  if(pageNumber<2)await page.click('#results-next');
+ }
+ assert.equal(seen.length,85);assert.equal(new Set(seen).size,85);
+ assert.equal(await page.locator('#results-next').isDisabled(),true);
+ await page.click('#operation-fit');
+ assert.equal(await page.evaluate(()=>stagePoints.every(p=>testApi.map.getBounds().contains([p.lat,p.lng]))),true,'Fit includes all pages');
+ await page.selectOption('#geo-kind','AMV');
+ await expectText('.results-total','43 resultados');await expectText('.map-results-pager','1 / 2');assert.equal(await markerCount(),43);
+ await page.click('#results-next');
+ await page.fill('#operation-search','Local 84');
+ await expectText('.results-total','1 resultado');assert.equal(await markerCount(),1);await expectText('.map-results-pager','1 / 1');
+ const routeURL=new URL(await page.locator('#operation-results .directions-link').getAttribute('href'));
+ assert.equal(routeURL.pathname,'/maps/dir/');assert.equal(routeURL.searchParams.get('destination'),await page.evaluate(()=>`${stagePoints[84].lat},${stagePoints[84].lng}`));
+ await page.locator('[data-result]').click();assert.equal(await page.evaluate(()=>lastInspect.id),'test-84');
+ await page.fill('#operation-search','inexistente');
+ assert.equal(await markerCount(),0);await expectText('#operation-results','Nenhum resultado');assert.equal(await page.locator('#operation-fit').isDisabled(),true);
+ await page.fill('#operation-search','');await page.selectOption('#geo-kind','');
+ await page.selectOption('#geo-line','Dupla');await expectText('.results-total','42 resultados');assert.equal(await markerCount(),42);
+ await page.selectOption('#geo-line','');
+ await page.selectOption('#geo-sub-from','74');await page.selectOption('#geo-sb','off');await page.selectOption('#geo-pn','off');
+ await expectText('.results-total','45 resultados');assert.equal(await markerCount(),45);
+ await page.selectOption('#geo-sub-to','75');await expectText('.results-total','87 resultados');
+ await page.selectOption('#geo-sb','off');await page.selectOption('#geo-pn','off');await expectText('.results-total','85 resultados');
+ await page.selectOption('#geo-points','off');await page.selectOption('#geo-stations','off');
+ await page.fill('#operation-search','Travessia');await expectText('#operation-results','Nenhuma camada ativada');
+ await page.selectOption('#geo-pn','on');await expectText('.results-total','1 resultado');
+ await page.selectOption('#geo-pn','off');await expectText('#operation-results','Nenhuma camada ativada');
+ await page.selectOption('#geo-sb','on');await page.fill('#operation-search','SB TEST');
+ await expectText('.results-total','1 resultado');await expectText('#operation-results','ponto médio da SB');
+ assert.equal(new URL(await page.locator('#operation-results .directions-link').getAttribute('href')).pathname,'/maps/dir/');
+ await page.selectOption('#geo-points','on');await page.fill('#operation-search','Local');
+ await page.screenshot({path:path.join(output,'stage1-desktop.png')});
+ await page.setViewportSize({width:390,height:844});await page.click('#layers-mobile');
+ assert.equal(await page.locator('.map-panel').evaluate(e=>e.scrollWidth<=e.clientWidth),true,'Results fit mobile panel');
+ await page.locator('#results-next').click();await expectText('.map-results-pager','2 / 3');
+ await page.screenshot({path:path.join(output,'stage1-mobile.png')});
  assert.deepEqual(errors,[]);
- console.log('PASS: historical drawing, unified modal, single SUB and inclusive interval, selected layers, preserved malha, PN/SB clicks, records, ambiguous/unlocated references and mobile layout.');
+ console.log('PASS: historical drawing, modal, SUB/malha, records, ambiguous/unlocated references, all 85 paginated results, synchronized filters/layers/counts, full bounds, routes and mobile layout.');
 }finally{await browser?.close();await new Promise(r=>server.close(r))}

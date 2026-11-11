@@ -14,6 +14,10 @@ export function googleMapsURL(lat,lng){
  return validCoordinate(lat,lng)?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`:null;
 }
 
+export function googleMapsDirectionsURL(lat,lng){
+ return validCoordinate(lat,lng)?`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`:null;
+}
+
 function distance(a,b){
  const dLat=radians(b.lat-a.lat),dLng=radians(longitudeDelta(b.lng-a.lng));
  const chord=Math.sin(dLat/2)**2+Math.cos(radians(a.lat))*Math.cos(radians(b.lat))*Math.sin(dLng/2)**2;
@@ -52,7 +56,7 @@ function nearestOnLine(origin,line){
  return nearest;
 }
 
-function midpointOnLine(line){
+export function midpointOnLine(line){
  const coordinates=coordinatePairs(line),segments=[];
  let total=0;
  for(let i=1;i<coordinates.length;i++){

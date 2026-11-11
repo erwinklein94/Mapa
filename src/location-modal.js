@@ -1,4 +1,4 @@
-import {googleMapsURL} from './location-context.js';
+import {googleMapsURL,googleMapsDirectionsURL} from './location-context.js';
 import {MALHAS} from './malhas.js';
 import {subLabel} from './subs.js';
 
@@ -8,7 +8,7 @@ const distance=m=>m<1000?`${Math.round(m)} m`:`${(m/1000).toLocaleString('pt-BR'
 const value=v=>v===null||v===undefined||v===''?'—':esc(v);
 const field=(name,v)=>`<div><dt>${esc(name)}</dt><dd>${value(v)}</dd></div>`;
 const subFields=item=>`${field('SUB(s)',item.subCodes?.map(n=>`SUB ${n}`).join(' / '))}${field('Origem da associação à SUB',item.subSource)}`;
-const mapsLink=(lat,lng)=>{const url=googleMapsURL(lat,lng);return url?`<a class="maps-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Google Maps ↗</a>`:''};
+const mapsLink=(lat,lng)=>{const url=googleMapsURL(lat,lng);return url?`<div class="location-map-actions"><a class="maps-link directions-link" href="${esc(googleMapsDirectionsURL(lat,lng))}" target="_blank" rel="noopener noreferrer">Como chegar ↗</a><a class="maps-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Ver no Google Maps ↗</a></div>`:''};
 
 export function locationFields(type,item={}){
  if(type==='point')return `<dl class="location-fields">${field('Tipo',item.kind)}${field('Sigla / pátio',item.yard)}${field('KM de origem',item.source_km)}${field('Linha',item.line_type)}${field('KM entrada',item.km_entry)}${field('KM saída',item.km_exit)}${field('Observações',item.notes)}${subFields(item)}</dl><p class="location-source">Fonte: KMZ e cadastros da equipe. O KM de origem mantém a unidade do arquivo.</p>`;
