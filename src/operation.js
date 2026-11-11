@@ -1,5 +1,6 @@
-import {MALHAS,malhaForPoint,malhaForLine} from './malhas.js';
-import {subMatches,subLabel} from './subs.js';
+import {MALHAS} from './malhas.js';
+import {createGeographicSelector,geographicKey,filterLabels,layerNames} from './map-filters.js';
+import {subLabel} from './subs.js';
 import {googleMapsDirectionsURL,midpointOnLine} from './location-context.js';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -9,34 +10,45 @@ const label=item=>item.category==='SUB'?`SUB ${item.text}`:item.text;
 const boundsFor=(L,box)=>L.latLngBounds([[-box[3],box[0]],[-box[1],box[2]]]);
 const sectionName=(catalog,id)=>catalog.details.find(d=>d.id===id)?.name||'Mapa geral';
 const matches=(item,q)=>norm(`${label(item)} ${item.contextText||''} ${[...item.codes,...(item.anchorCodes||[])].join(' ')}`).includes(norm(q));
-const pointMatches=(p,q)=>norm(`${p.name} ${p.yard} ${p.source_km} ${p.kind}`).includes(norm(q));
 const option=(value,text,selected)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(text)}</option>`;
 const destinationFor=r=>r.type==='sb'?midpointOnLine(r.item):r.item;
 const directionsLink=r=>{const p=destinationFor(r),url=googleMapsDirectionsURL(p?.lat,p?.lng);return url?`<a class="directions-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(`Como chegar a ${r.type==='sb'?'SB '+r.item.id:r.item.name||r.item.code}`)}">Como chegar ↗</a>${r.type==='sb'?'<small class="route-note">Destino: ponto médio da SB; acesso viário não verificado.</small>':''}`:''};
 let mapMode='drawing',selectedCatalogId='',geographicState={};
-let recordTab='locations',recordQuery='',recordSection='',recordPage=0,recordKind='';
+let recordTab='locations',recordQuery='',recordSection='',recordPage=0,recordKind='',recordMapFilters=null;
 
 export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSegments,pnPoints,stations,malhaIndex,subOptions=[],onPoint,onInspect,onAdd,onRecords,onMap,onPresentation,focus}){
- let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,hitLayer,pointCanvas,tile,adding=false,showHits=false,resultPage=0,geoRows=[];
- let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',subFrom='',subTo='',baseMode='street',query=''}=geographicState;
+ let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,hitLayer,pointCanvas,tile,adding=false,showHits=false,geoRows=[];
+ let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',subFrom='',subTo='',baseMode='street',query='',resultPage=0,selectedKey='',mobileView='map'}=geographicState;
  catalog=catalogs.find(c=>c.id===(focus?.catalogId||selectedCatalogId))||catalog;
  let currentPoints=points;
  const locatedStations=stations.filter(s=>Number.isFinite(s.lat)&&Number.isFinite(s.lng));
- const pointMalhas=new WeakMap(),pnMalhas=new WeakMap(),sbMalhas=new WeakMap(),stationMalhas=new WeakMap();
- const pointCode=p=>{if(!pointMalhas.has(p))pointMalhas.set(p,malhaForPoint(malhaIndex,p.lat,p.lng));return pointMalhas.get(p)};
- const pnCode=p=>{if(!pnMalhas.has(p))pnMalhas.set(p,malhaForPoint(malhaIndex,p.lat,p.lng));return pnMalhas.get(p)};
- const sbCode=s=>{if(!sbMalhas.has(s))sbMalhas.set(s,malhaForLine(malhaIndex,s.coordinates));return sbMalhas.get(s)};
- const stationCode=s=>{if(!stationMalhas.has(s))stationMalhas.set(s,malhaForPoint(malhaIndex,s.lat,s.lng));return stationMalhas.get(s)};
- const inMalha=code=>!malha||code===malha;
- const inSub=item=>subMatches(item.subCodes,subFrom,subTo);
- function selectGeographicResults(){
-  const q=norm(query.trim()),has=text=>norm(text).includes(q);
-  return [
-   ...(showStations?locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)&&has(`${s.name} ${s.code} ${s.records.map(r=>`${r.km} ${r.sub}`).join(' ')}`)).map(item=>({type:'station',item})):[]),
-   ...(showPoints?currentPoints.filter(p=>inMalha(pointCode(p))&&inSub(p)&&(!kind||p.kind===kind)&&(!line||p.line_type===line)&&pointMatches(p,q)).map(item=>({type:'point',item})):[]),
-   ...(showSB?sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)&&has(`SB ${s.id} ${s.km_start} ${s.km_end}`)).map(item=>({type:'sb',item})):[]),
-   ...(showPN?pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)&&has(`${p.name} ${p.km} ${p.place} ${p.uf} ${p.section}`)).map(item=>({type:'pn',item})):[])
-  ];
+ let selectGeo=createGeographicSelector({points:currentPoints,sbSegments,pnPoints,stations,malhaIndex});
+ const geoFilters=()=>({query,malha,kind,line,subFrom,subTo,layers:{points:showPoints,sb:showSB,pn:showPN,stations:showStations}});
+ function setMobileView(value,moveFocus=false){
+  mobileView=value;$('.operation-layout').dataset.mobileView=value;
+  root.querySelectorAll('button[data-mobile-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mobileView===value));
+  if(value==='map')map?.invalidateSize();
+  if(moveFocus&&window.matchMedia('(max-width:760px)').matches)root.querySelector('button[data-mobile-view="'+value+'"]').focus();
+ }
+ function activeFilters(){
+  if(mapMode!=='geographic')return;
+  const labels=filterLabels(geoFilters());
+  $('#active-filters').innerHTML=`<div class="filter-chips" aria-label="Filtros ativos">${labels.map(([key,text])=>`<button type="button" data-remove-filter="${key}" aria-label="Remover ${esc(text)}">${esc(text)} <span aria-hidden="true">×</span></button>`).join('')}</div><button type="button" id="clear-map-filters" ${!labels.length&&showPoints&&showSB&&showPN&&showStations?'disabled':''}>Limpar filtros</button>`;
+  root.querySelectorAll('[data-remove-filter]').forEach(b=>b.onclick=()=>{
+   const key=b.dataset.removeFilter;
+   if(key==='query')query='';if(key==='malha')malha='';if(key==='kind')kind='';if(key==='line')line='';if(key==='sub'){subFrom='';subTo=''}
+   syncControls();resultPage=0;drawGeo();search();$('#operation-search').focus();
+  });
+  $('#clear-map-filters').onclick=()=>{
+   query=malha=kind=line=subFrom=subTo='';showPoints=showSB=showPN=showStations=true;
+   syncControls();resultPage=0;drawGeo();search();fit();$('#operation-search').focus();
+  };
+ }
+ function syncControls(){
+  $('#operation-search').value=query;
+  for(const [id,value] of [['malha',malha],['kind',kind],['line',line],['sub-from',subFrom],['sub-to',subTo]])$('#geo-'+id).value=value;
+  for(const [id,on] of [['points',showPoints],['sb',showSB],['pn',showPN],['stations',showStations]])$('#geo-'+id).value=on?'on':'off';
+  $('#geo-sub-to').disabled=!subFrom;
  }
  const $=s=>root.querySelector(s);
  const fullBox=()=>[0,0,catalog.width,catalog.height];
@@ -73,15 +85,26 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
  }
 
  function disposePointCanvas(){if(!pointCanvas)return;L.Util.cancelAnimFrame(pointCanvas._redrawRequest);pointCanvas._redrawRequest=null;if(map?.hasLayer(pointCanvas))map.removeLayer(pointCanvas);pointCanvas=null}
- function stop(){geographicState={showPoints,showSB,showPN,showStations,showNames,kind,line,malha,subFrom,subTo,baseMode,query};observer?.disconnect();disposePointCanvas();map?.stop();map?.remove();map=null}
+ function stop(){geographicState={showPoints,showSB,showPN,showStations,showNames,kind,line,malha,subFrom,subTo,baseMode,query,resultPage,selectedKey,mobileView};observer?.disconnect();disposePointCanvas();map?.stop();map?.remove();map=null}
  function shell(){
-  stop();adding=false;showHits=false;resultPage=0;highlight=null;tile=null;selectedCatalogId=catalog.id;
-  root.innerHTML=`<div class="map-layout operation-layout"><aside class="map-panel operation-panel"><div class="eyebrow">REDE FERROVIÁRIA</div><h2>Mapa de operação</h2><p class="source-date">${mapMode==='drawing'?`Base SIV · ${esc(catalog.sourceDate)} · prancha completa`:'Consulta integrada · pontos, PN, SB e estações'}</p><div class="view-switch"><button data-mode="drawing" class="${mapMode==='drawing'?'active':''}">Prancha interativa</button><button data-mode="geographic" class="${mapMode==='geographic'?'active':''}">Mapa geográfico</button></div><label class="search-label" for="operation-search">Buscar na ${mapMode==='drawing'?'prancha':'malha'}</label><input id="operation-search" class="search" type="search" placeholder="${mapMode==='drawing'?'Nome, sigla, KM ou SUB':'Nome, sigla, KM, SB ou estação'}" value="${esc(query)}"><div id="operation-results" class="results" aria-live="polite"></div>${mapMode==='drawing'?drawingControls():geographicControls()}<div class="map-source-links"><button id="all-records">Consultar registros</button><a href="${sourcePath()}" target="_blank" rel="noopener">Abrir PDF original ↗</a>${mapMode==='geographic'?'<a href="assets/rail-stations.json" download>Baixar tabela de estações ↧</a>':''}</div></aside><section class="map-wrap" aria-label="${mapMode==='drawing'?'Prancha operacional interativa':'Mapa geográfico da malha completa'}"><div id="map"></div><div class="map-toolbar"><div class="row"><button id="layers-mobile" class="mobile-brand">Explorar</button><button id="operation-fit">${mapMode==='geographic'?'Ver todos no mapa':'Enquadrar resultados'}</button></div><div class="row"><button id="exit-present" class="present-only">Sair da apresentação</button>${mapMode==='geographic'?'<button id="add-map" class="primary">+ Novo ponto</button>':''}</div></div><div class="map-caption" id="operation-caption"></div><div class="drawing-hint" ${mapMode==='drawing'?'':'hidden'}>Role para ampliar · Arraste para navegar · Clique nos rótulos</div></section></div>`;
-  root.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mapMode=b.dataset.mode;query='';shell()});
+  stop();adding=false;showHits=false;highlight=null;tile=null;selectedCatalogId=catalog.id;
+  root.innerHTML=`<div class="map-layout operation-layout ${mapMode==='geographic'?'is-geographic':''}" data-mobile-view="map">
+   ${mapMode==='geographic'?'<div class="mobile-view-tabs" aria-label="Visualização"><button type="button" data-mobile-view="map">Mapa</button><button type="button" data-mobile-view="list">Lista</button><button type="button" data-mobile-view="filters">Filtros</button></div>':''}
+   <aside class="map-panel operation-panel">
+    <div class="map-panel-intro"><div class="eyebrow">REDE FERROVIÁRIA</div><h2>Mapa de operação</h2><p class="source-date">${mapMode==='drawing'?`Base SIV · ${esc(catalog.sourceDate)} · prancha completa`:'Consulta integrada · pontos, PN, SB e estações'}</p><div class="view-switch"><button data-mode="drawing" class="${mapMode==='drawing'?'active':''}">Prancha interativa</button><button data-mode="geographic" class="${mapMode==='geographic'?'active':''}">Mapa geográfico</button></div></div>
+    <div class="map-search"><label class="search-label" for="operation-search">Buscar na ${mapMode==='drawing'?'prancha':'malha'}</label><input id="operation-search" class="search" type="search" placeholder="${mapMode==='drawing'?'Nome, sigla, KM ou SUB':'Nome, sigla, KM, SB ou estação'}" value="${esc(query)}"></div>
+    ${mapMode==='geographic'?'<div id="active-filters"></div>':''}
+    <div id="operation-results" class="results" aria-live="polite"></div>
+    <div id="map-filter-controls">${mapMode==='drawing'?drawingControls():geographicControls()}</div>
+    <div class="map-source-links"><button id="all-records">${mapMode==='geographic'?'Abrir resultados em Registros':'Consultar registros'}</button><a href="${sourcePath()}" target="_blank" rel="noopener">Abrir PDF original ↗</a>${mapMode==='geographic'?'<a href="assets/rail-stations.json" download>Baixar tabela de estações ↧</a>':''}</div>
+   </aside>
+   <section class="map-wrap" aria-label="${mapMode==='drawing'?'Prancha operacional interativa':'Mapa geográfico da malha completa'}"><div id="map"></div><div class="map-toolbar"><div class="row"><button id="layers-mobile" class="mobile-brand">Explorar</button><button id="operation-fit">${mapMode==='geographic'?'Ver todos no mapa':'Enquadrar resultados'}</button></div><div class="row"><button id="exit-present" class="present-only">Sair da apresentação</button>${mapMode==='geographic'?'<button id="add-map" class="primary">+ Novo ponto</button>':''}</div></div><div class="map-caption" id="operation-caption"></div><div class="drawing-hint" ${mapMode==='drawing'?'':'hidden'}>Role para ampliar · Arraste para navegar · Clique nos rótulos</div></section></div>`;
+  root.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mapMode=b.dataset.mode;query='';resultPage=0;selectedKey='';shell()});
   $('#operation-search').oninput=e=>{query=e.target.value;resultPage=0;drawGeo();search()};
   $('#operation-fit').onclick=fit;
-  $('#all-records').onclick=()=>onRecords();
-  $('#layers-mobile').onclick=()=>$('.map-panel').classList.toggle('open');
+  $('#all-records').onclick=()=>onRecords(mapMode==='geographic'?{type:'map-results',filters:geoFilters()}:undefined);
+  root.querySelectorAll('button[data-mobile-view]').forEach(b=>b.onclick=()=>setMobileView(b.dataset.mobileView));
+  $('#layers-mobile').onclick=()=>{if(mapMode==='geographic')setMobileView('filters');$('.map-panel').classList.toggle('open')};
   $('#exit-present').onclick=()=>onPresentation(false);
   map=L.map('map',{crs:mapMode==='drawing'?L.CRS.Simple:L.CRS.EPSG3857,minZoom:mapMode==='drawing'?-3:2,maxZoom:mapMode==='drawing'?4:19,preferCanvas:true,renderer:new SafeCanvas({padding:.5,tolerance:3}),zoomAnimation:false,zoomControl:false,attributionControl:mapMode!=='drawing'});
   onMap(map);
@@ -120,8 +143,10 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
    map.on('click',e=>{if(adding){adding=false;$('#add-map').textContent='+ Novo ponto';onAdd(e.latlng)}else inspect({type:'coordinate',lat:e.latlng.lat,lng:e.latlng.lng})});
    drawGeo();
   }
-  observer=new ResizeObserver(()=>map?.invalidateSize());observer.observe($('#map'));
-  fit();search();
+  observer=new ResizeObserver(()=>{if($('#map')?.clientWidth)map?.invalidateSize()});observer.observe($('#map'));
+  fit();
+  const selected=geoRows.find(r=>geographicKey(r)===selectedKey);if(mapMode==='geographic'&&selected)selectResult(selected,{reveal:false,zoom:false,syncPage:false});
+  search();if(mapMode==='geographic')setMobileView(focus?.type==='map-return'?'map':mobileView);
  }
  function fit(){
   if(mapMode==='drawing'){
@@ -156,28 +181,51 @@ const NamedPointsCanvas=SafeCanvas.extend({
  }
  function drawGeo(){
   if(mapMode!=='geographic')return;
-  geoRows=selectGeographicResults();
+  geoRows=selectGeo(geoFilters());
+  if(!geoRows.some(r=>geographicKey(r)===selectedKey))selectedKey='';
   if(highlight){map.removeLayer(highlight);highlight=null}
   pointLayer.clearLayers();sbLayer.clearLayers();pnLayer.clearLayers();stationLayer.clearLayers();disposePointCanvas();pointCanvas=new NamedPointsCanvas({padding:.5,tolerance:8});let n=0;
   const byType=type=>geoRows.filter(r=>r.type===type).map(r=>r.item);
-  byType('sb').forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)inspect({type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng})}).addTo(sbLayer));
-  byType('point').forEach(p=>{n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'point',id:p.id})}).addTo(pointLayer)});
-  byType('pn').forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'pn',id:p.id})}).addTo(pnLayer));
-  byType('station').forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)inspect({type:'station',id:s.code})}).addTo(stationLayer));
+  byType('sb').forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)selectResult({type:'sb',item:s},{consult:true,reveal:false,zoom:false,reference:{type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng}})}).addTo(sbLayer));
+  byType('point').forEach(p=>{n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)selectResult({type:'point',item:p},{consult:true,reveal:false,zoom:false})}).addTo(pointLayer)});
+  byType('pn').forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)selectResult({type:'pn',item:p},{consult:true,reveal:false,zoom:false})}).addTo(pnLayer));
+  byType('station').forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)selectResult({type:'station',item:s},{consult:true,reveal:false,zoom:false})}).addTo(stationLayer));
   $('#operation-caption').textContent=`${fmt(n)} pontos · ${fmt(byType('sb').length)} SB · ${fmt(byType('pn').length)} PN · ${fmt(byType('station').length)} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}${subFrom?` · ${subLabel(subFrom,subTo)}`:''}${query.trim()?` · Busca: ${query.trim()}`:''}`;
+  const selected=geoRows.find(r=>geographicKey(r)===selectedKey);if(selected&&map.getZoom()!==undefined)selectResult(selected,{reveal:false,zoom:false,syncPage:false});
  }
  function search(){
   const q=query.trim(),drawing=mapMode==='drawing';
+  if(!drawing){activeFilters();const b=root.querySelector('button[data-mobile-view="list"]');b.textContent='Lista ('+fmt(geoRows.length)+')';}
   if(drawing&&!q){$('#operation-results').innerHTML='';$('#operation-fit').disabled=false;return}
   const rows=drawing?catalog.items.filter(i=>matches(i,q)).map(item=>({type:'pdf',item})):geoRows;
   const total=rows.length,pages=Math.max(1,Math.ceil(total/40));resultPage=Math.min(resultPage,pages-1);
   const visible=rows.slice(resultPage*40,(resultPage+1)*40);
   const noLayers=!drawing&&!showPoints&&!showSB&&!showPN&&!showStations;
   $('#operation-fit').disabled=!total;
-  $('#operation-results').innerHTML=total?`<p class="results-total" role="status">${fmt(total)} ${total===1?'resultado':'resultados'} · ${fmt(resultPage*40+1)}–${fmt(Math.min(total,(resultPage+1)*40))}</p><div class="map-result-list">${visible.map((r,i)=>`<div class="map-result"><button class="result" data-result="${i}">${esc(r.type==='pdf'?label(r.item):r.type==='sb'?`SB ${r.item.id}`:r.item.name)}<br><small>${esc(r.type==='pdf'?sectionName(catalog,r.item.section):r.type==='point'?r.item.kind:r.type==='pn'?`PN · ${r.item.place||r.item.section||r.item.km||'Passagem de nível'}`:r.type==='station'?`Estação ${r.item.code} · ${r.item.records.length} registro(s)`:`KM ${r.item.km_start} → ${r.item.km_end}`)}</small></button>${drawing?'':directionsLink(r)}</div>`).join('')}</div><div class="map-results-pager"><button type="button" id="results-prev" aria-label="Página anterior de resultados" ${resultPage===0?'disabled':''}>Anterior</button><span>${resultPage+1} / ${pages}</span><button type="button" id="results-next" aria-label="Próxima página de resultados" ${resultPage+1===pages?'disabled':''}>Próxima</button></div>`:`<p class="map-results-empty" role="status">${noLayers?'Nenhuma camada ativada. Escolha uma malha, uma SUB ou ative uma camada em “Exibir no mapa”.':'Nenhum resultado para os filtros selecionados. Ajuste a busca ou os filtros.'}</p>`;
+  $('#operation-results').innerHTML=total?`<p class="results-total" role="status">${fmt(total)} ${total===1?'resultado':'resultados'} · ${fmt(resultPage*40+1)}–${fmt(Math.min(total,(resultPage+1)*40))}</p><div class="map-result-list">${visible.map((r,i)=>`<div class="map-result ${!drawing&&geographicKey(r)===selectedKey?'selected':''}"><button class="result" data-result="${i}" aria-label="${esc('Ver no mapa: '+(r.type==='sb'?'SB '+r.item.id:r.item.name||label(r.item)))}" ${!drawing&&geographicKey(r)===selectedKey?'aria-current="true"':''}>${esc(r.type==='pdf'?label(r.item):r.type==='sb'?`SB ${r.item.id}`:r.item.name)}<br><small>${esc(r.type==='pdf'?sectionName(catalog,r.item.section):r.type==='point'?r.item.kind:r.type==='pn'?`PN · ${r.item.place||r.item.section||r.item.km||'Passagem de nível'}`:r.type==='station'?`Estação ${r.item.code} · ${r.item.records.length} registro(s)`:`KM ${r.item.km_start} → ${r.item.km_end}`)}</small>${drawing?'':'<span class="result-map-label">Ver no mapa →</span>'}</button>${drawing?'':`<p class="result-meta">${esc([r.item.subCodes?.map(n=>'SUB '+n).join(' / ')||'',r.item.source_km?'KM '+r.item.source_km:r.item.km?'KM '+r.item.km:''].filter(Boolean).join(' · '))}</p><div class="result-actions"><button type="button" data-result-details="${i}">Detalhes</button>${directionsLink(r)}</div>`}</div>`).join('')}</div><div class="map-results-pager"><button type="button" id="results-prev" aria-label="Página anterior de resultados" ${resultPage===0?'disabled':''}>Anterior</button><span>${resultPage+1} / ${pages}</span><button type="button" id="results-next" aria-label="Próxima página de resultados" ${resultPage+1===pages?'disabled':''}>Próxima</button></div>`:`<p class="map-results-empty" role="status">${noLayers?'Nenhuma camada ativada. Escolha uma malha, uma SUB ou ative uma camada em “Exibir no mapa”.':'Nenhum resultado para os filtros selecionados. Ajuste a busca ou os filtros.'}</p>`;
   const showPage=delta=>{resultPage+=delta;search();$('#operation-results').scrollTop=0;($('#operation-results').querySelector(delta>0?'#results-next:not(:disabled)':'#results-prev:not(:disabled)')||$('#operation-results').querySelector('.map-results-pager button:not(:disabled)'))?.focus({preventScroll:true})};
   if($('#results-prev')){$('#results-prev').onclick=()=>showPage(-1);$('#results-next').onclick=()=>showPage(1)}
-  root.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{const r=visible[Number(b.dataset.result)];if(r.type==='pdf')showItem(r.item,true);else if(r.type==='sb')focusSB(r.item);else{map.setView([r.item.lat,r.item.lng],15);if(highlight)map.removeLayer(highlight);highlight=L.circleMarker([r.item.lat,r.item.lng],{radius:10,weight:3,color:'#e32028',fillOpacity:.15,interactive:false}).addTo(map);inspect({type:r.type,id:r.type==='station'?r.item.code:r.item.id})}$('.map-panel').classList.remove('open')});
+  root.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{
+   const r=visible[Number(b.dataset.result)];if(r.type==='pdf')showItem(r.item,true);else selectResult(r);
+   $('.map-panel').classList.remove('open');
+  });
+  root.querySelectorAll('[data-result-details]').forEach(b=>b.onclick=()=>selectResult(visible[Number(b.dataset.resultDetails)],{consult:true,reveal:false}));
+
+ }
+ function selectResult(r,{consult=false,reveal=true,zoom=true,syncPage=true,reference}={}){
+  selectedKey=geographicKey(r);
+  const index=geoRows.findIndex(row=>geographicKey(row)===selectedKey);if(syncPage&&index>=0)resultPage=Math.floor(index/40);
+  if(reveal)setMobileView('map',true);
+  if(highlight)map.removeLayer(highlight);
+  if(r.type==='sb'){
+   if(zoom)map.fitBounds(r.item.coordinates.map(([lng,lat])=>[lat,lng]),{padding:[50,50],maxZoom:14});
+   highlight=L.polyline(r.item.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#e32028',weight:5,interactive:false}).addTo(map);
+  }else{
+   if(zoom)map.setView([r.item.lat,r.item.lng],15);
+   highlight=L.circleMarker([r.item.lat,r.item.lng],{radius:10,weight:3,color:'#e32028',fillOpacity:.15,interactive:false}).addTo(map);
+  }
+  search();
+  if(consult)inspect(reference||{type:r.type,id:r.type==='station'?r.item.code:r.item.id});
  }
  function focusSB(sb,consult=true){
   map.fitBounds(sb.coordinates.map(([lng,lat])=>[lat,lng]),{padding:[65,65],maxZoom:14});
@@ -209,7 +257,7 @@ const NamedPointsCanvas=SafeCanvas.extend({
    }
   }
  }
- return {destroy:stop,refresh:newPoints=>{currentPoints=newPoints;drawGeo();search()}};
+ return {destroy:stop,refresh:newPoints=>{currentPoints=newPoints;selectGeo=createGeographicSelector({points:currentPoints,sbSegments,pnPoints,stations,malhaIndex});drawGeo();search()}};
 }
 
 export function recordsForPoint(catalogs,p){
@@ -218,7 +266,7 @@ export function recordsForPoint(catalogs,p){
  return (Array.isArray(catalogs)?catalogs:[catalogs]).filter(Boolean).flatMap(c=>c.items.filter(i=>[...i.codes,...(i.anchorCodes||[])].includes(code)).map(i=>({...i,catalogId:c.id||'operation-2023',sourceDate:c.sourceDate,sourceTitle:c.title})));
 }
 
-export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sbSegments,pnPoints=[],stations=[],onPoint,onInspect,onAdd,onMap,focus}){
+export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sbSegments,pnPoints=[],stations=[],malhaIndex,onPoint,onInspect,onAdd,onMap,focus}){
  const documents=catalogs.filter(Boolean).map(c=>({...c,id:c.id||'operation-2023',assetBase:c.assetBase||'assets/operation'}));
  const documentById=new Map(documents.map(c=>[c.id,c]));
  const sourceTitle=c=>`${c.id==='rumo-2015'?'Rumo / ALL — acervo histórico':'Prancha operacional'} · ${c.sourceDate||c.source||c.title}`;
@@ -227,8 +275,13 @@ export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sb
  const pdfTabs=['locations','subs','notes'];
  const allPdf=documents.flatMap(c=>c.items.map(item=>({type:'pdf',item,catalog:c,sourceId:c.id,source:sourceTitle(c)})));
  const $=s=>root.querySelector(s);
+ const selectRecords=createGeographicSelector({points,sbSegments,pnPoints,stations,malhaIndex});
+ let scopedCache;
+ const scopedRows=()=>scopedCache??=selectRecords(recordMapFilters);
+ const geoTab={point:'points',pn:'pn',station:'stations',sb:'sb'};
  const sourceForTab=()=>recordTab==='points'?'KMZ e cadastros da equipe':recordTab==='sb'?'Ferrovia SB.kml':recordTab==='pn'?'Pns.zip':recordTab==='stations'?'Estações — SIV julho/2015':'';
  function candidates(){
+  if(recordMapFilters)return scopedRows().filter(r=>geoTab[r.type]===recordTab).map(r=>({...r,sourceId:recordTab,source:sourceForTab()}));
   if(recordTab==='points')return points.map(item=>({type:'point',item,sourceId:'points',source:sourceForTab()}));
   if(recordTab==='sb')return sbSegments.map(item=>({type:'sb',item,sourceId:'sb',source:sourceForTab()}));
   if(recordTab==='pn')return pnPoints.map(item=>({type:'pn',item,sourceId:'pn',source:sourceForTab()}));
@@ -259,6 +312,11 @@ export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sb
  function inspect(r){if(onInspect)onInspect(descriptor(r));else if(r.type==='point')onPoint(r.item);else onMap(descriptor(r))}
  function configureFocus(){
   if(!focus)return;
+  if(focus.type==='map-results'){
+   recordMapFilters=structuredClone(focus.filters);scopedCache=undefined;
+   recordTab=geoTab[scopedRows()[0]?.type]||'points';recordQuery=recordSource=recordCategory=recordSection='';recordPage=0;return;
+  }
+  recordMapFilters=null;scopedCache=undefined;
   recordPage=0;recordKind='';recordCategory='';recordSection='';
   if(focus.type==='point'||focus.type==='pn'||focus.type==='station'||focus.type==='sb'){
    recordTab=({point:'points',pn:'pn',station:'stations',sb:'sb'})[focus.type];
@@ -279,8 +337,9 @@ export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sb
   const areas=new Map([['general','Mapa geral']]);
   documents.filter(c=>!recordSource||c.id===recordSource).forEach(c=>c.details.forEach(d=>areas.set(d.id,d.name)));
   root.innerHTML=`<div class="page operation-records"><div class="page-head"><div><div class="eyebrow">ACERVO OPERACIONAL</div><h2>Registros da malha</h2><p class="muted">Consulte as pranchas, os cadastros, as passagens de nível e as estações no mesmo acervo.</p></div><button id="new-record" class="primary">+ Novo registro</button></div>
-   <div class="operation-stats records-stats"><div><strong>${fmt(allPdf.length)}</strong><span>Referências nas pranchas</span></div><div><strong>${fmt(sbSegments.length)}</strong><span>Segmentos de SB</span></div><div><strong>${fmt(points.length)}</strong><span>Pontos e cadastros</span></div><div><strong>${fmt(pnPoints.length)}</strong><span>Passagens de nível</span></div><div><strong>${fmt(stations.length)}</strong><span>Estações · ${fmt(stations.reduce((sum,s)=>sum+s.records.length,0))} registros SIV</span></div></div>
-   <div class="records-tabs" role="tablist" aria-label="Categorias de registros">${tabs.map(([id,name])=>`<button role="tab" aria-selected="${recordTab===id}" data-tab="${id}" class="${recordTab===id?'active':''}">${name}</button>`).join('')}</div>
+   ${recordMapFilters?`<section class="records-map-scope"><h3>Resultados selecionados no mapa</h3><p>${esc(filterLabels(recordMapFilters).map(([,text])=>text).join(' · ')||'Sem restrições de busca, malha ou SUB')}</p><p>Camadas: ${esc(Object.entries(recordMapFilters.layers).filter(([,on])=>on).map(([key])=>layerNames[key]).join(', ')||'nenhuma')} · ${fmt(scopedRows().length)} resultados no total.</p><div class="row"><button id="back-filtered-map">Voltar ao mapa</button><button id="clear-record-scope">Consultar todo o acervo</button></div></section>`:''}
+   <div class="operation-stats records-stats" ${recordMapFilters?'hidden':''}><div><strong>${fmt(allPdf.length)}</strong><span>Referências nas pranchas</span></div><div><strong>${fmt(sbSegments.length)}</strong><span>Segmentos de SB</span></div><div><strong>${fmt(points.length)}</strong><span>Pontos e cadastros</span></div><div><strong>${fmt(pnPoints.length)}</strong><span>Passagens de nível</span></div><div><strong>${fmt(stations.length)}</strong><span>Estações · ${fmt(stations.reduce((sum,s)=>sum+s.records.length,0))} registros SIV</span></div></div>
+   <div class="records-tabs" role="tablist" aria-label="Categorias de registros">${tabs.filter(([id])=>!recordMapFilters||Object.values(geoTab).includes(id)).map(([id,name])=>`<button role="tab" aria-selected="${recordTab===id}" data-tab="${id}" class="${recordTab===id?'active':''}">${name}</button>`).join('')}</div>
    <div class="card"><div class="filterbar operation-filterbar records-filters">
     <label class="geo-filter records-search"><span>Busca</span><input id="catalog-search" type="search" placeholder="Nome, sigla, SUB, número ou KM" value="${esc(recordQuery)}"></label>
     <label class="geo-filter"><span>Fonte e data</span><select id="catalog-source">${pdf?option('','Todas as pranchas',recordSource)+documents.map(c=>option(c.id,sourceTitle(c),recordSource)).join(''):option('',sourceForTab(),'')}</select></label>
@@ -290,6 +349,8 @@ export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sb
     <p class="catalog-source">${pdf?'Cada referência mantém a fonte e a data do documento. A prancha de 2015 é histórica e está marcada no original como mapa em revisão; diferenças entre as pranchas não são tratadas como atualizações do cadastro.':recordTab==='stations'?'Estações e limites quilométricos da relação SIV de julho de 2015. Coordenadas associadas por sigla ao KMZ ou à base Infra S.A.; estações sem localização verificada continuam disponíveis nesta tabela.':recordTab==='pn'?'Passagens de nível do arquivo Pns.zip, com nome, KM e localização originais.':recordTab==='sb'?'Segmentos do arquivo Ferrovia SB.kml, com coordenadas e valores de KM originais.':'Pontos do KMZ original e cadastros da equipe. Use Consultar para reunir as informações próximas ou Editar para alterar o cadastro.'}</p><div id="catalog-table"></div></div>
    <div class="source-footer">${pdf?documents.filter(c=>!recordSource||c.id===recordSource).map(c=>`<div><a href="${esc(c.assetBase)}/source.pdf" target="_blank" rel="noopener">${esc(sourceTitle(c))} · PDF ↗</a><br><a href="${esc(c.assetBase)}/catalog.json" download>Baixar catálogo desta prancha</a></div>`).join(''):recordTab==='stations'?'<a href="assets/rail-stations.json" download>Baixar catálogo completo de estações</a>':recordTab==='pn'?'<a href="assets/rail-pns.json" download>Baixar catálogo completo de passagens de nível</a>':''}</div></div>`;
   root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{recordTab=b.dataset.tab;recordQuery='';recordSection='';recordSource='';recordCategory='';recordKind='';recordPage=0;render()});
+  if($('#back-filtered-map'))$('#back-filtered-map').onclick=()=>onMap({type:'map-return'});
+  if($('#clear-record-scope'))$('#clear-record-scope').onclick=()=>{recordMapFilters=null;scopedCache=undefined;recordQuery=recordCategory=recordSource=recordSection='';recordPage=0;render()};
   $('#catalog-search').oninput=e=>{recordQuery=e.target.value;recordPage=0;table()};
   $('#catalog-source').onchange=e=>{recordSource=e.target.value;recordSection='';recordPage=0;render()};
   $('#catalog-section').onchange=e=>{recordSection=e.target.value;recordPage=0;table()};

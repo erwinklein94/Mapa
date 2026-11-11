@@ -22,6 +22,15 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 
 ## Interface
 
+### Etapa 2 — exploração e continuidade dos filtros
+
+- No celular, **Mapa**, **Lista** e **Filtros** são telas separadas, com botões sempre disponíveis. Alternar entre elas conserva busca, filtros, página e seleção; a lista ocupa a largura da tela.
+- Os resultados oferecem **Ver no mapa**, **Detalhes** e **Como chegar** separadamente. Ver no mapa destaca o ponto sem abrir a consulta; a seleção fica marcada também na lista. SUB e KM são apresentados quando disponíveis.
+- Busca, malha, SUB, tipo e linha aparecem como etiquetas removíveis. **Limpar filtros** limpa esses critérios e ativa as quatro camadas para mostrar a cobertura completa; nomes e base cartográfica são mantidos.
+- **Abrir resultados em Registros** leva os mesmos critérios e camadas para a tabela, incluindo a busca. A tabela usa a mesma seleção geográfica do mapa, preserva o recorte ao trocar entre pontos, SB, PN e estações e permite refiná-lo por busca/categoria. O CSV exporta todos os resultados filtrados da categoria, não apenas a página atual.
+- O painel em Registros identifica o recorte e oferece **Voltar ao mapa** e **Consultar todo o acervo**. Esta última ação remove o recorte da tabela e restaura também as abas de referências históricas; os filtros do mapa permanecem preservados.
+- A compilação inclui `src/explore.css`. A integração em `scripts/verify-map-ui.mjs` verifica etiquetas, seleção, navegação móvel, contagem por categoria em Registros, CSV completo e retorno ao mapa com os filtros mantidos. Os testes usam dados locais, sem alteração do banco.
+
 ### Etapa 1 — resultados completos e rotas
 
 - A lista do mapa geográfico mostra todos os resultados das camadas ativas, mesmo sem texto de busca, em páginas de 40 itens. A busca na prancha também tem paginação.
@@ -29,7 +38,7 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 - **Ver todos no mapa** enquadra os resultados de todas as páginas, com limite de aproximação para um único ponto. Sem resultados, a ação fica desativada. A interface distingue nenhuma camada ativa de nenhum resultado para os filtros.
 - **Como chegar** está disponível na lista geográfica, nos registros, na consulta integrada e no cadastro de pontos com coordenadas válidas. Abre uma rota de carro no Google Maps, que utiliza a origem disponível ou permite informá-la. O link de visualização da localização continua disponível na consulta.
 - Para SB, a lista e os registros usam o ponto médio do traçado; a consulta de um clique usa a posição indicada na geometria. O destino ferroviário não equivale a um acesso viário verificado. Referências sem coordenadas e rótulos ambíguos não recebem rotas inventadas.
-- A busca geográfica é preservada ao sair e voltar à página durante a sessão; alternar entre prancha e mapa geográfico limpa a busca. A tabela de Registros mantém seus filtros próprios nesta etapa.
+- A busca geográfica é preservada ao sair e voltar à página durante a sessão; alternar entre prancha e mapa geográfico limpa a busca. A integração dos filtros com Registros foi acrescentada na etapa 2.
 
 Validação: `node scripts/verify-location-context.mjs`, `node scripts/verify-records.mjs`, `node scripts/verify-subs.mjs` e `node scripts/verify-map-ui.mjs` após a compilação. A integração usa dados locais, inclui 85 pontos distribuídos em três páginas e verifica contagens, filtros, camadas, enquadramento completo, rotas e o painel móvel, sem autenticação ou alterações no banco.
 
