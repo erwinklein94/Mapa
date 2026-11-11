@@ -22,6 +22,14 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 
 ## Interface
 
+### Etapa 3 — grupos e locais sobrepostos
+
+- Pontos/cadastros, PN e estações próximos na tela são representados por círculos numerados. Ao aproximar o mapa, os grupos se dividem conforme a distância visual entre os locais. As SB continuam como traçados independentes.
+- Clicar em um grupo abre a relação dos seus locais, com contagem por categoria, páginas de oito itens, **Ver no mapa**, **Detalhes** e **Como chegar** para cada destino. **Aproximar grupo** amplia a região; no zoom máximo, a lista continua permitindo escolher entre registros que compartilham a mesma posição. Os grupos também podem ser abertos por teclado.
+- Os agrupamentos usam somente os resultados dos filtros atuais. A contagem, a lista principal, o enquadramento, os registros e o CSV continuam representando cada item individualmente. Alterar busca ou camadas fecha a seleção do grupo anterior.
+- Cada registro mantém suas coordenadas e sua identidade. O círculo usa a posição de um membro como âncora visual, e as rotas usam exclusivamente as coordenadas do item escolhido; não há rota para uma coordenada média do grupo.
+- `node scripts/verify-map-clusters.mjs` verifica conservação dos 10.444 pontos, coordenadas imutáveis, limites entre células, sobreposição e separação por zoom. `node scripts/verify-map-ui.mjs` cobre também 92 registros sobrepostos, todas as páginas, destinos exatos, escolha no zoom máximo, filtros, teclado e layout móvel.
+
 ### Etapa 2 — exploração e continuidade dos filtros
 
 - No celular, **Mapa**, **Lista** e **Filtros** são telas separadas, com botões sempre disponíveis. Alternar entre elas conserva busca, filtros, página e seleção; a lista ocupa a largura da tela.

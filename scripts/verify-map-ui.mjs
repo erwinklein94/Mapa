@@ -54,6 +54,16 @@ try{
  await page.route('https://**/*',r=>r.abort());
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.waitForFunction(()=>window.ready);
  const close=async()=>{if(await page.locator('#modal').evaluate(d=>d.open))await page.locator('#modal .close').click()};
+ const clickGeographicType=async type=>{
+  const result=await page.evaluate(type=>{
+   const layers=[];testApi.map.eachLayer(l=>{if(l.options?.groupRows?.some(r=>r.type===type))layers.push(l)});
+   layers.sort((a,b)=>a.options.groupRows.length-b.options.groupRows.length);
+   if(!layers.length)throw Error('Geographic type not found: '+type);
+   const layer=layers[0],index=layer.options.groupRows.findIndex(r=>r.type===type),size=layer.options.groupRows.length;
+   layer.fire('click',{latlng:layer.getLatLng()});return {index,size};
+  },type);
+  if(result.size>1){for(let i=0;i<Math.floor(result.index/8);i++)await page.click('[data-group-next]');await page.locator('[data-group-details]').nth(result.index%8).click()}
+ };
  const expectText=async(selector,text)=>assert.ok((await page.locator(selector).innerText()).includes(text),`${selector} must contain ${text}`);
  await page.selectOption('#drawing-source','rumo-2015');
  await expectText('#operation-caption','1.421');
@@ -71,7 +81,7 @@ try{
  await page.selectOption('#geo-malha','RMN');
  for(const id of ['points','sb','pn','stations'])assert.equal(await page.locator('#geo-'+id).inputValue(),'on');
  // Fire a click on the real PN layer, then verify the same modal respects selected layers.
- await page.evaluate(()=>{let layer;testApi.map.eachLayer(l=>{if(!layer&&l.options?.fillColor==='#e86321')layer=l});if(!layer)throw Error('PN layer absent');layer.fire('click',{latlng:layer.getLatLng()})});
+ await clickGeographicType('pn');
  assert.equal(await page.locator('#location-scope').inputValue(),'selected');
  await expectText('#modal','Passagem de nível');await expectText('#modal','Malha Norte');
  await page.click('[data-location-map]');
@@ -88,7 +98,7 @@ try{
  const pointCount=s=>Number(s.split(' pontos')[0].replaceAll('.',''));
  assert.ok(pointCount(exact)>0,'A single SUB must show mapped points');
  assert.ok(pointCount(range)>pointCount(exact),'The inclusive interval must add points from other SUBs');
- await page.evaluate(()=>{let layer;testApi.map.eachLayer(l=>{if(!layer&&l.options?.fillColor==='#0037dd')layer=l});if(!layer)throw Error('Filtered point layer absent');layer.fire('click',{latlng:layer.getLatLng()})});
+ await clickGeographicType('point');
  await expectText('#modal','SUB 74–98');
  assert.equal(await page.locator('#location-scope').inputValue(),'selected');
  await close();
@@ -131,7 +141,7 @@ try{
  await expectText('#operation-results','Nenhuma camada ativada');
  assert.equal(await page.locator('#operation-fit').isDisabled(),true);
  await page.selectOption('#geo-points','on');
- const markerCount=()=>page.evaluate(()=>{let n=0;testApi.map.eachLayer(l=>{if(l.options?.fillColor==='#0037dd')n++});return n});
+ const markerCount=()=>page.evaluate(()=>{let n=0;testApi.map.eachLayer(l=>{if(l.options?.groupRows)n+=l.options.groupRows.filter(r=>r.type==='point').length});return n});
  assert.equal(await markerCount(),85);await expectText('.results-total','85 resultados');
  const seen=[];
  for(let pageNumber=0;pageNumber<3;pageNumber++){
@@ -221,6 +231,58 @@ try{
  assert.equal(await page.locator('#operation-search').inputValue(),'');assert.equal(await page.locator('[data-remove-filter]').count(),0);
  await page.click('button[data-mobile-view="list"]');await page.screenshot({path:path.join(output,'stage2-mobile-all.png')});
  await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:path.join(output,'stage2-desktop.png')});
+ // Stage 3: overlap across layers, all group pages, exact destinations and zoom.
+ await page.setViewportSize({width:1440,height:1000});await page.reload();await page.waitForFunction(()=>window.ready);
+ await page.evaluate(()=>{
+  const points=Array.from({length:90},(_,i)=>({id:'overlap-'+i,name:'Local sobreposto',yard:'DUP',source_km:String(i),lat:-23-i*.0000001,lng:-46,kind:'AMV',line_type:'Singela',subCodes:['74']}));
+  points.push({id:'far-point',name:'Local distante',lat:-23.5,lng:-46.5,kind:'AMV',line_type:'Singela',subCodes:['75']});
+  window.overlapPoints=points;
+  testApi.mountMap(undefined,{points,sbSegments:[],pnPoints:[{id:'overlap-pn',name:'PN sobreposta',lat:-23.00001,lng:-46,subCodes:['74']}],stations:[{code:'DUP',name:'Estação sobreposta',lat:-23.00002,lng:-46,records:[{sub:'74',km:'10'}],subCodes:['74']}],onInspect:r=>window.overlapInspect=r});
+ });
+ await page.click('[data-mode="geographic"]');await page.click('#clear-map-filters');
+ await expectText('.results-total','93 resultados');
+ const representation=()=>page.evaluate(()=>{let total=0,groups=0;testApi.map.eachLayer(l=>{const rows=l.options?.groupRows;if(rows){total+=rows.length;if(rows.length>1)groups++}});return {total,groups}});
+ assert.equal((await representation()).total,93);assert.ok((await representation()).groups>0);
+ const overviewZoom=await page.evaluate(()=>testApi.map.getZoom());
+ await page.locator('.map-cluster').first().focus();await page.keyboard.press('Enter');
+ assert.equal(await page.locator('.cluster-choice').count(),1,'Groups are keyboard accessible');
+ await page.click('[data-group-zoom]');assert.ok(await page.evaluate(()=>testApi.map.getZoom())>overviewZoom);
+ assert.equal((await representation()).total,93,'Zoom must conserve every result');
+ await page.evaluate(()=>testApi.map.setView([-23,-46],19));
+ const coincident=await page.evaluate(()=>{let found;testApi.map.eachLayer(l=>{if(l.options?.groupRows?.some(r=>r.item.id==='overlap-89'))found=l});const rows=found.options.groupRows;found.fire('click');return {count:rows.length,index:rows.findIndex(r=>r.item.id==='overlap-89')}});
+ assert.equal(coincident.count,92);assert.equal(await page.locator('[data-group-zoom]').count(),0,'At maximum zoom overlapping points remain individually accessible');
+ const groupMembers=[];
+ for(let i=0;i<Math.ceil(coincident.count/8);i++){
+  groupMembers.push(...await page.locator('[data-group-key]').evaluateAll(rows=>rows.map(r=>r.dataset.groupKey)));
+  if(i+1<Math.ceil(coincident.count/8))await page.click('[data-group-next]');
+ }
+ assert.equal(groupMembers.length,92);assert.equal(new Set(groupMembers).size,92);
+ const chosen=page.locator('[data-group-key="point:overlap-89"]');
+ const chosenURL=new URL(await chosen.locator('.directions-link').getAttribute('href'));
+ assert.equal(chosenURL.searchParams.get('destination'),await page.evaluate(()=>`${overlapPoints[89].lat},${overlapPoints[89].lng}`));
+ await chosen.locator('[data-group-details]').click();await page.waitForFunction(()=>!document.querySelector('.cluster-choice'));assert.deepEqual(await page.evaluate(()=>overlapInspect),{type:'point',id:'overlap-89'});
+ assert.equal(await page.evaluate(()=>testApi.map.getZoom()),19,'Choosing a member must not zoom out from the maximum detail');
+ assert.equal(await page.locator('.map-result.selected').count(),1);
+ await page.evaluate(()=>{testApi.map.setView([-23,-46],19);let l;testApi.map.eachLayer(x=>{if(x.options?.groupRows?.length===92)l=x});l.fire('click')});
+ await page.selectOption('#geo-pn','off');await page.waitForFunction(()=>!document.querySelector('.cluster-choice'));assert.equal(await page.locator('.cluster-choice').count(),0,'Changing filters closes stale group choices');
+ assert.equal((await representation()).total,92);await expectText('.results-total','92 resultados');
+ await page.selectOption('#geo-stations','off');assert.equal((await representation()).total,91);
+ await page.fill('#operation-search','distante');assert.equal((await representation()).total,1);assert.equal((await representation()).groups,0);
+ await page.fill('#operation-search','');await page.selectOption('#geo-pn','on');await page.selectOption('#geo-stations','on');
+ await page.setViewportSize({width:390,height:844});
+ await page.evaluate(()=>{testApi.map.setView([-23,-46],19);let l;testApi.map.eachLayer(x=>{if(x.options?.groupRows?.length===92)l=x});l.fire('click')});
+ assert.equal(await page.locator('.cluster-choice').evaluate(e=>e.scrollWidth<=e.clientWidth),true,'Group choice fits mobile width');
+ await page.waitForFunction(()=>{const popup=document.querySelector('.leaflet-popup');return popup&&Number(getComputedStyle(popup).opacity)===1&&popup.getBoundingClientRect().top>=document.querySelector('.map-toolbar').getBoundingClientRect().bottom+8});
+ assert.equal(await page.locator('.leaflet-popup-close-button').evaluate(e=>{const r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}),true,'Map controls must not cover the mobile close button');
+ await page.screenshot({path:path.join(output,'stage3-mobile-overlap.png')});
+ await page.locator('[data-group-map]').first().click();
+ await page.waitForFunction(()=>!document.querySelector('.cluster-choice'));
+ assert.equal(await page.locator('.cluster-choice').count(),0);assert.equal(await page.locator('.map-result.selected').count(),1);
+ assert.equal((await representation()).total,93);
+ await page.setViewportSize({width:1440,height:1000});await page.reload();await page.waitForFunction(()=>window.ready);
+ await page.click('[data-mode="geographic"]');await page.click('#clear-map-filters');
+ assert.equal(await page.locator('.map-cluster').evaluateAll(markers=>markers.every(m=>{const a=m.getBoundingClientRect(),b=m.querySelector('span').getBoundingClientRect();return Math.abs(a.x+a.width/2-b.x-b.width/2)<2&&Math.abs(a.y+a.height/2-b.y-b.height/2)<2})),true,'Cluster counts are centered and readable');
+ await page.screenshot({path:path.join(output,'stage3-desktop.png')});
  assert.deepEqual(errors,[]);
- console.log('PASS: map/modal regression, all pages, synchronized filters, routes, removable filters, mobile map/list/filter navigation, preserved selection, scoped records and complete CSV export.');
+ console.log('PASS: map/modal and records regressions; complete filtered CSV; clusters conserve results; all 92 overlapping members accessible; exact routes, keyboard, zoom, filters, centered counts and mobile popup layout.');
 }finally{await browser?.close();await new Promise(r=>server.close(r))}

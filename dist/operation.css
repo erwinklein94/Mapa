@@ -48,3 +48,14 @@
  .is-geographic .map-caption{max-width:calc(100% - 30px);font-size:.68rem;bottom:24px;line-height:1.5}
  .records-map-scope .row button{min-height:44px;font-size:.8rem}
 }
+.leaflet-marker-icon.map-cluster{display:flex;align-items:center;justify-content:center;background:var(--primary);color:var(--primary-text);border:3px solid var(--surface);border-radius:50%;box-shadow:0 2px 7px #00386544;font:700 12px Cera,Verdana,sans-serif;cursor:pointer}
+.map-cluster:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.cluster-choice{color:var(--text);font-family:Cera,Verdana,sans-serif;max-width:100%}
+.cluster-choice h3{font-size:1rem;margin:0 0 8px}.cluster-choice p{font-size:.74rem;line-height:1.5;margin:7px 0}
+.cluster-choice-list{max-height:min(32dvh,250px);overflow:auto;overscroll-behavior:contain;margin:10px 0}
+.cluster-choice article{padding:12px 0;border-bottom:1px solid var(--border)}.cluster-choice strong,.cluster-choice small{display:block;overflow-wrap:anywhere}.cluster-choice strong{font-size:.82rem}.cluster-choice small{font-size:.72rem;margin:5px 0;color:var(--muted)}
+.cluster-choice .result-actions{padding:0;gap:5px}.cluster-choice button{font-size:.72rem;padding:8px;min-height:40px}.cluster-choice .directions-link{font-size:.74rem;padding:9px 4px;color:var(--link)}
+.cluster-choice-pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-size:.75rem}
+.leaflet-popup-content-wrapper:has(.cluster-choice),.leaflet-popup:has(.cluster-choice) .leaflet-popup-tip{background:var(--surface)}
+@media(max-width:760px){.cluster-choice button,.cluster-choice .directions-link{min-height:44px}.leaflet-popup-content:has(.cluster-choice){margin:16px;max-width:calc(100vw - 70px)}}
+@media(max-width:760px){#map:has(.cluster-choice) .leaflet-control-zoom{visibility:hidden}.leaflet-popup:has(.cluster-choice) .leaflet-popup-close-button{width:36px;height:36px;line-height:36px;color:var(--text)}.cluster-choice h3{padding-right:24px}}

@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {groupMapPoints} from '../src/map-clusters.js';
+const row=(id,lat,lng,type='point')=>({type,item:{id,lat,lng}});
+const input=[row('a',0,0),row('b',0,0),row('pn',0,.1,'pn'),row('station',0,.2,'station'),row('far',10,10),row('sb',0,0,'sb'),row('bad',null,null)];
+const before=structuredClone(input),project=(lat,lng)=>({x:lng*100,y:lat*100});
+const groups=groupMapPoints(input,project);
+assert.deepEqual(groups.map(g=>g.rows.length),[4,1]);
+assert.deepEqual(input,before,'Grouping must not modify original records');
+assert.equal(groups[0].lat,0);assert.equal(groups[0].lng,0);
+assert.equal(groups[0].rows.filter(r=>r.item.lat===0&&r.item.lng===0).length,2,'Coincident records remain distinct');
+assert.equal(groupMapPoints(input,(lat,lng)=>({x:lng*10000,y:lat*10000})).length,4,'Zoom separates nearby points but preserves coincident ones');
+// Neighboring cells must not split points that actually overlap.
+assert.equal(groupMapPoints([row('left',0,51),row('right',0,53)],(lat,lng)=>({x:lng,y:lat})).length,1);
+assert.equal(groupMapPoints([row('left',0,-1),row('right',0,1)],(lat,lng)=>({x:lng,y:lat})).length,1);
+assert.throws(()=>groupMapPoints([],project,0),RangeError);
+const points=JSON.parse(readFileSync(new URL('../dist/assets/rail-points.json',import.meta.url),'utf8')).map(item=>({type:'point',item}));
+const overview=groupMapPoints(points,(lat,lng)=>({x:lng*10,y:lat*10}));
+assert.ok(overview.length<points.length/10,'Overview should substantially reduce marker count');
+const ids=overview.flatMap(g=>g.rows.map(r=>r.item.id));
+assert.equal(ids.length,points.length);assert.equal(new Set(ids).size,points.length,'Every point appears exactly once');
+for(const g of overview)assert.ok(g.rows.some(r=>r.item.lat===g.lat&&r.item.lng===g.lng),'Anchor belongs to an actual record');
+console.log(`PASS: overlap, cell boundaries, zoom separation, immutable coordinates and all ${points.length} points in ${overview.length} overview groups.`);

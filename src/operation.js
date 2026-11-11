@@ -1,4 +1,5 @@
 import {MALHAS} from './malhas.js';
+import {groupMapPoints} from './map-clusters.js';
 import {createGeographicSelector,geographicKey,filterLabels,layerNames} from './map-filters.js';
 import {subLabel} from './subs.js';
 import {googleMapsDirectionsURL,midpointOnLine} from './location-context.js';
@@ -17,7 +18,7 @@ let mapMode='drawing',selectedCatalogId='',geographicState={};
 let recordTab='locations',recordQuery='',recordSection='',recordPage=0,recordKind='',recordMapFilters=null;
 
 export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSegments,pnPoints,stations,malhaIndex,subOptions=[],onPoint,onInspect,onAdd,onRecords,onMap,onPresentation,focus}){
- let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,hitLayer,pointCanvas,tile,adding=false,showHits=false,geoRows=[];
+ let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,clusterLayer,hitLayer,pointCanvas,tile,adding=false,showHits=false,geoRows=[];
  let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',subFrom='',subTo='',baseMode='street',query='',resultPage=0,selectedKey='',mobileView='map'}=geographicState;
  catalog=catalogs.find(c=>c.id===(focus?.catalogId||selectedCatalogId))||catalog;
  let currentPoints=points;
@@ -71,6 +72,7 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
    ${showHide('geo-pn','Passagens de nível',showPN,'<i class="pn-swatch"></i>')}
    ${showHide('geo-stations','Estações (SIV 2015)',showStations,'<i class="station-swatch"></i>')}
    ${showHide('geo-names','Nomes dos pontos',showNames)}
+   <p class="panel-note">Círculos numerados reúnem locais próximos. Clique para escolher um local ou aproximar o grupo. A lista mantém todos os resultados.</p>
    ${selectFilter('geo-base','Base cartográfica',[['street','Ruas'],['terrain','Terreno']],baseMode)}
    <p class="panel-note">${fmt(currentPoints.length)} pontos · ${fmt(sbSegments.length)} SB · ${fmt(pnPoints.length)} PN · ${fmt(locatedStations.length)} estações localizadas. ${fmt(stations.length-locatedStations.length)} estações sem coordenadas permanecem na tabela para download.</p></div>`;
  }
@@ -128,8 +130,10 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
    $('#detail-select').onchange=e=>{if(highlight)map.removeLayer(highlight);const detail=catalog.details.find(d=>d.id===e.target.value);map.fitBounds(boundsFor(L,detail?.box||fullBox()),{padding:[35,35]});$('.map-panel').classList.remove('open')};
    $('#operation-caption').textContent=`${fmt(catalog.items.length)} rótulos consultáveis · ${catalog.subs.length} SUB · Cores originais`;
   }else{
+   const selectedPane=map.createPane('selected-result');selectedPane.style.zIndex='650';selectedPane.style.pointerEvents='none';
    setBase(baseMode);L.control.scale({imperial:false,position:'bottomright'}).addTo(map);
-   pointLayer=L.layerGroup().addTo(map);sbLayer=L.featureGroup().addTo(map);pnLayer=L.layerGroup().addTo(map);stationLayer=L.layerGroup().addTo(map);
+   pointLayer=L.layerGroup().addTo(map);sbLayer=L.featureGroup().addTo(map);pnLayer=L.layerGroup().addTo(map);stationLayer=L.layerGroup().addTo(map);clusterLayer=L.layerGroup().addTo(map);
+   map.on('zoomend',()=>{map.closePopup();renderGeoPoints()});
    $('#geo-sub-to').disabled=!subFrom;
    const activateLayers=()=>{showPoints=showSB=showPN=showStations=true;for(const id of ['geo-points','geo-sb','geo-pn','geo-stations'])$('#'+id).value='on'};
    $('#geo-malha').onchange=e=>{malha=e.target.value;if(malha){activateLayers();kind=line='';$('#geo-kind').value=$('#geo-line').value=''}resultPage=0;drawGeo();search();fit()};
@@ -181,17 +185,66 @@ const NamedPointsCanvas=SafeCanvas.extend({
  }
  function drawGeo(){
   if(mapMode!=='geographic')return;
+  map.closePopup();
   geoRows=selectGeo(geoFilters());
   if(!geoRows.some(r=>geographicKey(r)===selectedKey))selectedKey='';
   if(highlight){map.removeLayer(highlight);highlight=null}
-  pointLayer.clearLayers();sbLayer.clearLayers();pnLayer.clearLayers();stationLayer.clearLayers();disposePointCanvas();pointCanvas=new NamedPointsCanvas({padding:.5,tolerance:8});let n=0;
+  sbLayer.clearLayers();
   const byType=type=>geoRows.filter(r=>r.type===type).map(r=>r.item);
   byType('sb').forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)selectResult({type:'sb',item:s},{consult:true,reveal:false,zoom:false,reference:{type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng}})}).addTo(sbLayer));
-  byType('point').forEach(p=>{n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)selectResult({type:'point',item:p},{consult:true,reveal:false,zoom:false})}).addTo(pointLayer)});
-  byType('pn').forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)selectResult({type:'pn',item:p},{consult:true,reveal:false,zoom:false})}).addTo(pnLayer));
-  byType('station').forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)selectResult({type:'station',item:s},{consult:true,reveal:false,zoom:false})}).addTo(stationLayer));
-  $('#operation-caption').textContent=`${fmt(n)} pontos · ${fmt(byType('sb').length)} SB · ${fmt(byType('pn').length)} PN · ${fmt(byType('station').length)} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}${subFrom?` · ${subLabel(subFrom,subTo)}`:''}${query.trim()?` · Busca: ${query.trim()}`:''}`;
+  renderGeoPoints();
+  $('#operation-caption').textContent=`${fmt(byType('point').length)} pontos · ${fmt(byType('sb').length)} SB · ${fmt(byType('pn').length)} PN · ${fmt(byType('station').length)} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}${subFrom?` · ${subLabel(subFrom,subTo)}`:''}${query.trim()?` · Busca: ${query.trim()}`:''}`;
   const selected=geoRows.find(r=>geographicKey(r)===selectedKey);if(selected&&map.getZoom()!==undefined)selectResult(selected,{reveal:false,zoom:false,syncPage:false});
+ }
+ function renderGeoPoints(){
+  if(mapMode!=='geographic'||!map||map.getZoom()===undefined)return;
+  pointLayer.clearLayers();pnLayer.clearLayers();stationLayer.clearLayers();clusterLayer.clearLayers();disposePointCanvas();
+  pointCanvas=new NamedPointsCanvas({padding:.5,tolerance:8});
+  const groups=groupMapPoints(geoRows,(lat,lng)=>map.project([lat,lng],map.getZoom()));
+  const styles={point:{radius:4,color:'#0037dd',layer:pointLayer},pn:{radius:5,color:'#e86321',layer:pnLayer},station:{radius:6,color:'#813bb7',layer:stationLayer}};
+  for(const group of groups){
+   if(group.rows.length>1){
+    const count=group.rows.length,title=fmt(count)+' locais próximos. Escolher um local ou aproximar.';
+    const marker=L.marker([group.lat,group.lng],{icon:L.divIcon({className:'map-cluster',html:'<span>'+fmt(count)+'</span>',iconSize:[44,44],iconAnchor:[22,22]}),title,keyboard:true,bubblingMouseEvents:false,groupRows:group.rows});
+    marker.on('click',()=>{if(!adding)openGroup(group)}).on('add',()=>{
+     const element=marker.getElement();element.setAttribute('aria-label',title);
+     element.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();e.stopPropagation();if(!adding)openGroup(group)}});
+    }).addTo(clusterLayer);
+   }else{
+    const r=group.rows[0],p=r.item,style=styles[r.type];
+    L.circleMarker([p.lat,p.lng],{radius:style.radius,weight:1.5,color:'#fff',fillColor:style.color,fillOpacity:1,renderer:pointCanvas,pointName:showNames&&r.type==='point'?p.name:null,bubblingMouseEvents:false,groupRows:group.rows})
+     .bindTooltip(esc(r.type==='station'?p.name+' ('+p.code+')':p.name))
+     .on('click',()=>{if(!adding)selectResult(r,{consult:true,reveal:false,zoom:false})}).addTo(style.layer);
+   }
+  }
+ }
+ function openGroup(group){
+  let page=0;const pageSize=8,rows=group.rows,pages=Math.ceil(rows.length/pageSize);
+  const names={point:'Ponto / cadastro',pn:'Passagem de nível',station:'Estação'};
+  const popup=L.popup({maxWidth:360,minWidth:240,autoPanPadding:[20,75]}).setLatLng([group.lat,group.lng]);
+  const groupBounds=L.latLngBounds(rows.map(r=>[r.item.lat,r.item.lng]));
+  const canZoom=map.getZoom()<map.getMaxZoom();
+  const summary=Object.entries(names).map(([type,name])=>{const n=rows.filter(r=>r.type===type).length;return n?name+': '+fmt(n):''}).filter(Boolean).join(' · ');
+  function render(focusSelector){
+   const shown=rows.slice(page*pageSize,(page+1)*pageSize),content=document.createElement('section');content.className='cluster-choice';
+   // Pagination replaces the clicked DOM node. Stop the original event before
+   // Leaflet can mistake that detached target for a click on the map background.
+   content.addEventListener('click',e=>e.stopPropagation());
+   content.addEventListener('dblclick',e=>e.stopPropagation());
+   content.innerHTML=`<h3>${fmt(rows.length)} locais neste grupo</h3><p>${esc(summary)}</p><p>Escolha o destino exato abaixo. Os locais podem compartilhar a mesma coordenada.</p>${canZoom?'<button type="button" data-group-zoom>Aproximar grupo</button>':''}<div class="cluster-choice-list">${shown.map((r,i)=>`<article data-group-key="${esc(geographicKey(r))}"><strong>${esc(r.item.name||r.item.code||'Ponto')}</strong><small>${esc(names[r.type])}${r.item.code?' · '+esc(r.item.code):''}${r.item.source_km?' · KM '+esc(r.item.source_km):r.item.km?' · KM '+esc(r.item.km):''}</small><div class="result-actions"><button type="button" data-group-map="${i}">Ver no mapa</button><button type="button" data-group-details="${i}">Detalhes</button>${directionsLink(r)}</div></article>`).join('')}</div><div class="cluster-choice-pager"><button type="button" data-group-prev ${page===0?'disabled':''}>Anterior</button><span role="status">${page+1} / ${pages}</span><button type="button" data-group-next ${page+1===pages?'disabled':''}>Próxima</button></div>`;
+   const choose=(i,consult)=>{map.closePopup();selectResult(shown[i],{consult})};
+   content.querySelectorAll('[data-group-map]').forEach(b=>b.onclick=()=>choose(Number(b.dataset.groupMap),false));
+   content.querySelectorAll('[data-group-details]').forEach(b=>b.onclick=()=>choose(Number(b.dataset.groupDetails),true));
+   content.querySelector('[data-group-prev]').onclick=()=>{page--;render('[data-group-prev]')};
+   content.querySelector('[data-group-next]').onclick=()=>{page++;render('[data-group-next]')};
+   if(canZoom)content.querySelector('[data-group-zoom]').onclick=()=>{
+    const zoom=Math.min(map.getMaxZoom(),Math.max(map.getZoom()+1,map.getBoundsZoom(groupBounds,false,L.point(80,80))));
+    map.closePopup();map.setView(groupBounds.getCenter(),zoom);
+   };
+   popup.setContent(content);
+   if(focusSelector){const preferred=content.querySelector(focusSelector);(preferred.disabled?content.querySelector('.cluster-choice-pager button:not(:disabled)'):preferred)?.focus({preventScroll:true})}
+  }
+  render();popup.openOn(map);popup.getElement().querySelector('button')?.focus({preventScroll:true});
  }
  function search(){
   const q=query.trim(),drawing=mapMode==='drawing';
@@ -213,6 +266,7 @@ const NamedPointsCanvas=SafeCanvas.extend({
 
  }
  function selectResult(r,{consult=false,reveal=true,zoom=true,syncPage=true,reference}={}){
+  map.closePopup();
   selectedKey=geographicKey(r);
   const index=geoRows.findIndex(row=>geographicKey(row)===selectedKey);if(syncPage&&index>=0)resultPage=Math.floor(index/40);
   if(reveal)setMobileView('map',true);
@@ -221,8 +275,8 @@ const NamedPointsCanvas=SafeCanvas.extend({
    if(zoom)map.fitBounds(r.item.coordinates.map(([lng,lat])=>[lat,lng]),{padding:[50,50],maxZoom:14});
    highlight=L.polyline(r.item.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#e32028',weight:5,interactive:false}).addTo(map);
   }else{
-   if(zoom)map.setView([r.item.lat,r.item.lng],15);
-   highlight=L.circleMarker([r.item.lat,r.item.lng],{radius:10,weight:3,color:'#e32028',fillOpacity:.15,interactive:false}).addTo(map);
+   if(zoom)map.setView([r.item.lat,r.item.lng],Math.max(15,map.getZoom()));
+   highlight=L.circleMarker([r.item.lat,r.item.lng],{pane:'selected-result',radius:27,weight:3,color:'#e32028',fillOpacity:0,interactive:false}).addTo(map);
   }
   search();
   if(consult)inspect(reference||{type:r.type,id:r.type==='station'?r.item.code:r.item.id});
