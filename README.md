@@ -22,6 +22,19 @@ Supabase: `rgjdhajnbwmjoqceeypd`. A chave pública no cliente é intencional; au
 
 ## Interface
 
+### Etapa 1 — resultados completos e rotas
+
+- A lista do mapa geográfico mostra todos os resultados das camadas ativas, mesmo sem texto de busca, em páginas de 40 itens. A busca na prancha também tem paginação.
+- Busca, malha, SUB, tipo de ponto, tipo de linha e camadas alimentam a mesma seleção de resultados geográficos. A lista, os marcadores, a contagem e **Ver todos no mapa** usam essa seleção; trocar a página da lista não remove os demais resultados do mapa.
+- **Ver todos no mapa** enquadra os resultados de todas as páginas, com limite de aproximação para um único ponto. Sem resultados, a ação fica desativada. A interface distingue nenhuma camada ativa de nenhum resultado para os filtros.
+- **Como chegar** está disponível na lista geográfica, nos registros, na consulta integrada e no cadastro de pontos com coordenadas válidas. Abre uma rota de carro no Google Maps, que utiliza a origem disponível ou permite informá-la. O link de visualização da localização continua disponível na consulta.
+- Para SB, a lista e os registros usam o ponto médio do traçado; a consulta de um clique usa a posição indicada na geometria. O destino ferroviário não equivale a um acesso viário verificado. Referências sem coordenadas e rótulos ambíguos não recebem rotas inventadas.
+- A busca geográfica é preservada ao sair e voltar à página durante a sessão; alternar entre prancha e mapa geográfico limpa a busca. A tabela de Registros mantém seus filtros próprios nesta etapa.
+
+Validação: `node scripts/verify-location-context.mjs`, `node scripts/verify-records.mjs`, `node scripts/verify-subs.mjs` e `node scripts/verify-map-ui.mjs` após a compilação. A integração usa dados locais, inclui 85 pontos distribuídos em três páginas e verifica contagens, filtros, camadas, enquadramento completo, rotas e o painel móvel, sem autenticação ou alterações no banco.
+
+### Recursos existentes
+
 - O botão de menu (☰) no topo recolhe a barra lateral para uma coluna só de ícones. A escolha fica salva no navegador.
 - Na página Mapa, "Modo Apresentação" coloca a página em tela cheia e esconde a barra lateral, o topo e o painel de camadas, que abre pelo botão "Camadas". Para sair, use "Sair da apresentação" ou Esc.
 - O botão de sol/lua alterna entre tema claro e escuro. A página sempre abre no tema claro. No tema escuro, a base "Ruas" é escurecida por filtro CSS.

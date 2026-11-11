@@ -1,5 +1,6 @@
 import {MALHAS,malhaForPoint,malhaForLine} from './malhas.js';
 import {subMatches,subLabel} from './subs.js';
+import {googleMapsDirectionsURL,midpointOnLine} from './location-context.js';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -10,12 +11,14 @@ const sectionName=(catalog,id)=>catalog.details.find(d=>d.id===id)?.name||'Mapa 
 const matches=(item,q)=>norm(`${label(item)} ${item.contextText||''} ${[...item.codes,...(item.anchorCodes||[])].join(' ')}`).includes(norm(q));
 const pointMatches=(p,q)=>norm(`${p.name} ${p.yard} ${p.source_km} ${p.kind}`).includes(norm(q));
 const option=(value,text,selected)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(text)}</option>`;
+const destinationFor=r=>r.type==='sb'?midpointOnLine(r.item):r.item;
+const directionsLink=r=>{const p=destinationFor(r),url=googleMapsDirectionsURL(p?.lat,p?.lng);return url?`<a class="directions-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(`Como chegar a ${r.type==='sb'?'SB '+r.item.id:r.item.name||r.item.code}`)}">Como chegar ↗</a>${r.type==='sb'?'<small class="route-note">Destino: ponto médio da SB; acesso viário não verificado.</small>':''}`:''};
 let mapMode='drawing',selectedCatalogId='',geographicState={};
 let recordTab='locations',recordQuery='',recordSection='',recordPage=0,recordKind='';
 
 export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSegments,pnPoints,stations,malhaIndex,subOptions=[],onPoint,onInspect,onAdd,onRecords,onMap,onPresentation,focus}){
- let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,hitLayer,pointCanvas,tile,adding=false,query='',showHits=false;
- let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',subFrom='',subTo='',baseMode='street'}=geographicState;
+ let map,observer,highlight,pointLayer,sbLayer,pnLayer,stationLayer,hitLayer,pointCanvas,tile,adding=false,showHits=false,resultPage=0,geoRows=[];
+ let {showPoints=false,showSB=false,showPN=false,showStations=false,showNames=false,kind='',line='',malha='',subFrom='',subTo='',baseMode='street',query=''}=geographicState;
  catalog=catalogs.find(c=>c.id===(focus?.catalogId||selectedCatalogId))||catalog;
  let currentPoints=points;
  const locatedStations=stations.filter(s=>Number.isFinite(s.lat)&&Number.isFinite(s.lng));
@@ -26,6 +29,15 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
  const stationCode=s=>{if(!stationMalhas.has(s))stationMalhas.set(s,malhaForPoint(malhaIndex,s.lat,s.lng));return stationMalhas.get(s)};
  const inMalha=code=>!malha||code===malha;
  const inSub=item=>subMatches(item.subCodes,subFrom,subTo);
+ function selectGeographicResults(){
+  const q=norm(query.trim()),has=text=>norm(text).includes(q);
+  return [
+   ...(showStations?locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)&&has(`${s.name} ${s.code} ${s.records.map(r=>`${r.km} ${r.sub}`).join(' ')}`)).map(item=>({type:'station',item})):[]),
+   ...(showPoints?currentPoints.filter(p=>inMalha(pointCode(p))&&inSub(p)&&(!kind||p.kind===kind)&&(!line||p.line_type===line)&&pointMatches(p,q)).map(item=>({type:'point',item})):[]),
+   ...(showSB?sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)&&has(`SB ${s.id} ${s.km_start} ${s.km_end}`)).map(item=>({type:'sb',item})):[]),
+   ...(showPN?pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)&&has(`${p.name} ${p.km} ${p.place} ${p.uf} ${p.section}`)).map(item=>({type:'pn',item})):[])
+  ];
+ }
  const $=s=>root.querySelector(s);
  const fullBox=()=>[0,0,catalog.width,catalog.height];
  const sourcePath=()=>`${catalog.assetBase}/source.pdf`;
@@ -61,12 +73,12 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
  }
 
  function disposePointCanvas(){if(!pointCanvas)return;L.Util.cancelAnimFrame(pointCanvas._redrawRequest);pointCanvas._redrawRequest=null;if(map?.hasLayer(pointCanvas))map.removeLayer(pointCanvas);pointCanvas=null}
- function stop(){geographicState={showPoints,showSB,showPN,showStations,showNames,kind,line,malha,subFrom,subTo,baseMode};observer?.disconnect();disposePointCanvas();map?.stop();map?.remove();map=null}
+ function stop(){geographicState={showPoints,showSB,showPN,showStations,showNames,kind,line,malha,subFrom,subTo,baseMode,query};observer?.disconnect();disposePointCanvas();map?.stop();map?.remove();map=null}
  function shell(){
-  stop();adding=false;showHits=false;selectedCatalogId=catalog.id;
-  root.innerHTML=`<div class="map-layout operation-layout"><aside class="map-panel operation-panel"><div class="eyebrow">REDE FERROVIÁRIA</div><h2>Mapa de operação</h2><p class="source-date">${mapMode==='drawing'?`Base SIV · ${esc(catalog.sourceDate)} · prancha completa`:'Consulta integrada · pontos, PN, SB e estações'}</p><div class="view-switch"><button data-mode="drawing" class="${mapMode==='drawing'?'active':''}">Prancha interativa</button><button data-mode="geographic" class="${mapMode==='geographic'?'active':''}">Mapa geográfico</button></div><label class="search-label" for="operation-search">Buscar na ${mapMode==='drawing'?'prancha':'malha'}</label><input id="operation-search" class="search" type="search" placeholder="${mapMode==='drawing'?'Nome, sigla, KM ou SUB':'Nome, sigla, KM, SB ou estação'}" value="${esc(query)}"><div id="operation-results" class="results" aria-live="polite"></div>${mapMode==='drawing'?drawingControls():geographicControls()}<div class="map-source-links"><button id="all-records">Consultar registros</button><a href="${sourcePath()}" target="_blank" rel="noopener">Abrir PDF original ↗</a>${mapMode==='geographic'?'<a href="assets/rail-stations.json" download>Baixar tabela de estações ↧</a>':''}</div></aside><section class="map-wrap" aria-label="${mapMode==='drawing'?'Prancha operacional interativa':'Mapa geográfico da malha completa'}"><div id="map"></div><div class="map-toolbar"><div class="row"><button id="layers-mobile" class="mobile-brand">Explorar</button><button id="operation-fit">Enquadrar mapa</button></div><div class="row"><button id="exit-present" class="present-only">Sair da apresentação</button>${mapMode==='geographic'?'<button id="add-map" class="primary">+ Novo ponto</button>':''}</div></div><div class="map-caption" id="operation-caption"></div><div class="drawing-hint" ${mapMode==='drawing'?'':'hidden'}>Role para ampliar · Arraste para navegar · Clique nos rótulos</div></section></div>`;
+  stop();adding=false;showHits=false;resultPage=0;highlight=null;tile=null;selectedCatalogId=catalog.id;
+  root.innerHTML=`<div class="map-layout operation-layout"><aside class="map-panel operation-panel"><div class="eyebrow">REDE FERROVIÁRIA</div><h2>Mapa de operação</h2><p class="source-date">${mapMode==='drawing'?`Base SIV · ${esc(catalog.sourceDate)} · prancha completa`:'Consulta integrada · pontos, PN, SB e estações'}</p><div class="view-switch"><button data-mode="drawing" class="${mapMode==='drawing'?'active':''}">Prancha interativa</button><button data-mode="geographic" class="${mapMode==='geographic'?'active':''}">Mapa geográfico</button></div><label class="search-label" for="operation-search">Buscar na ${mapMode==='drawing'?'prancha':'malha'}</label><input id="operation-search" class="search" type="search" placeholder="${mapMode==='drawing'?'Nome, sigla, KM ou SUB':'Nome, sigla, KM, SB ou estação'}" value="${esc(query)}"><div id="operation-results" class="results" aria-live="polite"></div>${mapMode==='drawing'?drawingControls():geographicControls()}<div class="map-source-links"><button id="all-records">Consultar registros</button><a href="${sourcePath()}" target="_blank" rel="noopener">Abrir PDF original ↗</a>${mapMode==='geographic'?'<a href="assets/rail-stations.json" download>Baixar tabela de estações ↧</a>':''}</div></aside><section class="map-wrap" aria-label="${mapMode==='drawing'?'Prancha operacional interativa':'Mapa geográfico da malha completa'}"><div id="map"></div><div class="map-toolbar"><div class="row"><button id="layers-mobile" class="mobile-brand">Explorar</button><button id="operation-fit">${mapMode==='geographic'?'Ver todos no mapa':'Enquadrar resultados'}</button></div><div class="row"><button id="exit-present" class="present-only">Sair da apresentação</button>${mapMode==='geographic'?'<button id="add-map" class="primary">+ Novo ponto</button>':''}</div></div><div class="map-caption" id="operation-caption"></div><div class="drawing-hint" ${mapMode==='drawing'?'':'hidden'}>Role para ampliar · Arraste para navegar · Clique nos rótulos</div></section></div>`;
   root.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mapMode=b.dataset.mode;query='';shell()});
-  $('#operation-search').oninput=e=>{query=e.target.value;search()};
+  $('#operation-search').oninput=e=>{query=e.target.value;resultPage=0;drawGeo();search()};
   $('#operation-fit').onclick=fit;
   $('#all-records').onclick=()=>onRecords();
   $('#layers-mobile').onclick=()=>$('.map-panel').classList.toggle('open');
@@ -97,12 +109,12 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
    pointLayer=L.layerGroup().addTo(map);sbLayer=L.featureGroup().addTo(map);pnLayer=L.layerGroup().addTo(map);stationLayer=L.layerGroup().addTo(map);
    $('#geo-sub-to').disabled=!subFrom;
    const activateLayers=()=>{showPoints=showSB=showPN=showStations=true;for(const id of ['geo-points','geo-sb','geo-pn','geo-stations'])$('#'+id).value='on'};
-   $('#geo-malha').onchange=e=>{malha=e.target.value;if(malha){activateLayers();kind=line='';$('#geo-kind').value=$('#geo-line').value=''}drawGeo();search();fit()};
-   $('#geo-sub-from').onchange=e=>{subFrom=e.target.value;if(!subFrom){subTo='';$('#geo-sub-to').value=''}$('#geo-sub-to').disabled=!subFrom;if(subFrom)activateLayers();drawGeo();search();fit()};
-   $('#geo-sub-to').onchange=e=>{subTo=e.target.value;if(subFrom)activateLayers();drawGeo();search();fit()};
-   for(const [id,update] of [['geo-points',v=>showPoints=v],['geo-sb',v=>showSB=v],['geo-pn',v=>showPN=v],['geo-stations',v=>showStations=v],['geo-names',v=>showNames=v]])$('#'+id).onchange=e=>{update(e.target.value==='on');drawGeo()};
-   $('#geo-kind').onchange=e=>{kind=e.target.value;drawGeo();search()};
-   $('#geo-line').onchange=e=>{line=e.target.value;drawGeo();search()};
+   $('#geo-malha').onchange=e=>{malha=e.target.value;if(malha){activateLayers();kind=line='';$('#geo-kind').value=$('#geo-line').value=''}resultPage=0;drawGeo();search();fit()};
+   $('#geo-sub-from').onchange=e=>{subFrom=e.target.value;if(!subFrom){subTo='';$('#geo-sub-to').value=''}$('#geo-sub-to').disabled=!subFrom;if(subFrom)activateLayers();resultPage=0;drawGeo();search();fit()};
+   $('#geo-sub-to').onchange=e=>{subTo=e.target.value;if(subFrom)activateLayers();resultPage=0;drawGeo();search();fit()};
+   for(const [id,update] of [['geo-points',v=>showPoints=v],['geo-sb',v=>showSB=v],['geo-pn',v=>showPN=v],['geo-stations',v=>showStations=v],['geo-names',v=>showNames=v]])$('#'+id).onchange=e=>{update(e.target.value==='on');resultPage=0;drawGeo();search()};
+   $('#geo-kind').onchange=e=>{kind=e.target.value;resultPage=0;drawGeo();search()};
+   $('#geo-line').onchange=e=>{line=e.target.value;resultPage=0;drawGeo();search()};
    $('#geo-base').onchange=e=>setBase(e.target.value);
    $('#add-map').onclick=()=>{adding=!adding;$('#add-map').textContent=adding?'Clique no mapa ou cancele':'+ Novo ponto'};
    map.on('click',e=>{if(adding){adding=false;$('#add-map').textContent='+ Novo ponto';onAdd(e.latlng)}else inspect({type:'coordinate',lat:e.latlng.lat,lng:e.latlng.lng})});
@@ -112,18 +124,15 @@ export function mountOperationMap({L,root,catalog,catalogs=[catalog],points,sbSe
   fit();search();
  }
  function fit(){
-  if(mapMode==='drawing'){map.fitBounds(boundsFor(L,fullBox()),{padding:[15,15]});return}
+  if(mapMode==='drawing'){
+   const rows=query.trim()?catalog.items.filter(i=>matches(i,query.trim())):[];
+   const bounds=rows.length?L.latLngBounds(rows.flatMap(i=>{const b=boundsFor(L,i.box);return [b.getSouthWest(),b.getNorthEast()]})):boundsFor(L,fullBox());
+   map.fitBounds(bounds,{padding:[30,30],maxZoom:2});return;
+  }
   const bounds=L.latLngBounds([]);
-  const visiblePoints=currentPoints.filter(p=>inMalha(pointCode(p))&&inSub(p)&&(!kind||p.kind===kind)&&(!line||p.line_type===line));
-  const visibleSB=sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s));
-  const visiblePN=pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p));
-  const visibleStations=locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s));
-  if(showPoints)visiblePoints.forEach(p=>bounds.extend([p.lat,p.lng]));
-  if(showSB)visibleSB.forEach(s=>s.coordinates.forEach(([lng,lat])=>bounds.extend([lat,lng])));
-  if(showPN)visiblePN.forEach(p=>bounds.extend([p.lat,p.lng]));
-  if(showStations)visibleStations.forEach(s=>bounds.extend([s.lat,s.lng]));
-  if(!bounds.isValid()&&!subFrom&&!malha)currentPoints.forEach(p=>bounds.extend([p.lat,p.lng]));
-  if(bounds.isValid())map.fitBounds(bounds,{padding:[30,30]});
+  geoRows.forEach(({type,item})=>type==='sb'?item.coordinates.forEach(([lng,lat])=>bounds.extend([lat,lng])):bounds.extend([item.lat,item.lng]));
+  if(bounds.isValid())map.fitBounds(bounds,{padding:[30,30],maxZoom:16});
+  else if(!map.getZoom())map.setView([-15.6,-47.9],4);
  }
 const SafeCanvas=L.Canvas.extend({
  _redraw(){if(!this._ctx)return;L.Canvas.prototype._redraw.call(this)}
@@ -147,23 +156,28 @@ const NamedPointsCanvas=SafeCanvas.extend({
  }
  function drawGeo(){
   if(mapMode!=='geographic')return;
+  geoRows=selectGeographicResults();
+  if(highlight){map.removeLayer(highlight);highlight=null}
   pointLayer.clearLayers();sbLayer.clearLayers();pnLayer.clearLayers();stationLayer.clearLayers();disposePointCanvas();pointCanvas=new NamedPointsCanvas({padding:.5,tolerance:8});let n=0;
-  if(showSB)sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)).forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)inspect({type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng})}).addTo(sbLayer));
-  if(showPoints)currentPoints.forEach(p=>{if(!inMalha(pointCode(p))||!inSub(p)||(kind&&p.kind!==kind)||(line&&p.line_type!==line))return;n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'point',id:p.id})}).addTo(pointLayer)});
-  if(showPN)pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)).forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'pn',id:p.id})}).addTo(pnLayer));
-  if(showStations)locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)).forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)inspect({type:'station',id:s.code})}).addTo(stationLayer));
-  $('#operation-caption').textContent=`${fmt(n)} pontos · ${showSB?fmt(sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)).length):'0'} SB · ${showPN?fmt(pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)).length):'0'} PN · ${showStations?fmt(locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)).length):'0'} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}${subFrom?` · ${subLabel(subFrom,subTo)}`:''}`;
+  const byType=type=>geoRows.filter(r=>r.type===type).map(r=>r.item);
+  byType('sb').forEach(s=>L.polyline(s.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#007fa6',weight:3,opacity:.8,bubblingMouseEvents:false}).bindTooltip(`SB ${esc(s.id)}`,{sticky:true}).on('click',e=>{if(!adding)inspect({type:'sb',id:s.id,lat:e.latlng.lat,lng:e.latlng.lng})}).addTo(sbLayer));
+  byType('point').forEach(p=>{n++;L.circleMarker([p.lat,p.lng],{radius:4,weight:1,color:'#fff',fillColor:'#0037dd',fillOpacity:1,renderer:pointCanvas,pointName:showNames?p.name:null,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'point',id:p.id})}).addTo(pointLayer)});
+  byType('pn').forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,weight:1.5,color:'#fff',fillColor:'#e86321',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(esc(p.name)).on('click',()=>{if(!adding)inspect({type:'pn',id:p.id})}).addTo(pnLayer));
+  byType('station').forEach(s=>L.circleMarker([s.lat,s.lng],{radius:6,weight:1.5,color:'#fff',fillColor:'#813bb7',fillOpacity:1,renderer:pointCanvas,bubblingMouseEvents:false}).bindTooltip(`${esc(s.name)} (${esc(s.code)})`).on('click',()=>{if(!adding)inspect({type:'station',id:s.code})}).addTo(stationLayer));
+  $('#operation-caption').textContent=`${fmt(n)} pontos · ${fmt(byType('sb').length)} SB · ${fmt(byType('pn').length)} PN · ${fmt(byType('station').length)} estações${malha?` · ${MALHAS.find(m=>m.code===malha)?.name}`:''}${subFrom?` · ${subLabel(subFrom,subTo)}`:''}${query.trim()?` · Busca: ${query.trim()}`:''}`;
  }
  function search(){
-  const q=query.trim();if(!q){$('#operation-results').innerHTML='';return}
-  const rows=mapMode==='drawing'?catalog.items.filter(i=>matches(i,q)):currentPoints.filter(p=>inMalha(pointCode(p))&&inSub(p)&&(!kind||p.kind===kind)&&(!line||p.line_type===line)&&pointMatches(p,q));
-  const sbRows=mapMode==='geographic'?sbSegments.filter(s=>inMalha(sbCode(s))&&inSub(s)&&norm(`SB ${s.id} ${s.km_start} ${s.km_end}`).includes(norm(q))):[];
-  const pnRows=mapMode==='geographic'?pnPoints.filter(p=>inMalha(pnCode(p))&&inSub(p)&&norm(`${p.name} ${p.km} ${p.place} ${p.uf} ${p.section}`).includes(norm(q))):[];
-  const stationRows=mapMode==='geographic'?locatedStations.filter(s=>inMalha(stationCode(s))&&inSub(s)&&norm(`${s.name} ${s.code} ${s.records.map(r=>`${r.km} ${r.sub}`).join(' ')}`).includes(norm(q))):[];
-  const total=rows.length+sbRows.length+pnRows.length+stationRows.length;
-  const visible=[...stationRows.map(item=>({item,type:'station'})),...rows.map(i=>({item:i,type:mapMode==='drawing'?'pdf':'point'})),...sbRows.map(item=>({item,type:'sb'})),...pnRows.map(item=>({item,type:'pn'}))].slice(0,40);
-  $('#operation-results').innerHTML=visible.length?`<p class="results-total">${fmt(total)} resultados${total>40?' · primeiros 40':''}</p>${visible.map((r,i)=>`<button class="result" data-result="${i}">${esc(r.type==='pdf'?label(r.item):r.type==='sb'?`SB ${r.item.id}`:r.item.name)}<br><small>${esc(r.type==='pdf'?sectionName(catalog,r.item.section):r.type==='point'?r.item.kind:r.type==='pn'?`PN · ${r.item.place||r.item.section||r.item.km||'Passagem de nível'}`:r.type==='station'?`Estação ${r.item.code} · ${r.item.records.length} registro(s)`:`KM ${r.item.km_start} → ${r.item.km_end}`)}</small></button>`).join('')}`:'<p class="muted">Nenhum resultado.</p>';
-  root.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{const r=visible[Number(b.dataset.result)];if(r.type==='pdf')showItem(r.item,true);else if(r.type==='sb')focusSB(r.item);else{map.setView([r.item.lat,r.item.lng],15);inspect({type:r.type,id:r.type==='station'?r.item.code:r.item.id},false)}$('.map-panel').classList.remove('open')});
+  const q=query.trim(),drawing=mapMode==='drawing';
+  if(drawing&&!q){$('#operation-results').innerHTML='';$('#operation-fit').disabled=false;return}
+  const rows=drawing?catalog.items.filter(i=>matches(i,q)).map(item=>({type:'pdf',item})):geoRows;
+  const total=rows.length,pages=Math.max(1,Math.ceil(total/40));resultPage=Math.min(resultPage,pages-1);
+  const visible=rows.slice(resultPage*40,(resultPage+1)*40);
+  const noLayers=!drawing&&!showPoints&&!showSB&&!showPN&&!showStations;
+  $('#operation-fit').disabled=!total;
+  $('#operation-results').innerHTML=total?`<p class="results-total" role="status">${fmt(total)} ${total===1?'resultado':'resultados'} · ${fmt(resultPage*40+1)}–${fmt(Math.min(total,(resultPage+1)*40))}</p><div class="map-result-list">${visible.map((r,i)=>`<div class="map-result"><button class="result" data-result="${i}">${esc(r.type==='pdf'?label(r.item):r.type==='sb'?`SB ${r.item.id}`:r.item.name)}<br><small>${esc(r.type==='pdf'?sectionName(catalog,r.item.section):r.type==='point'?r.item.kind:r.type==='pn'?`PN · ${r.item.place||r.item.section||r.item.km||'Passagem de nível'}`:r.type==='station'?`Estação ${r.item.code} · ${r.item.records.length} registro(s)`:`KM ${r.item.km_start} → ${r.item.km_end}`)}</small></button>${drawing?'':directionsLink(r)}</div>`).join('')}</div><div class="map-results-pager"><button type="button" id="results-prev" aria-label="Página anterior de resultados" ${resultPage===0?'disabled':''}>Anterior</button><span>${resultPage+1} / ${pages}</span><button type="button" id="results-next" aria-label="Próxima página de resultados" ${resultPage+1===pages?'disabled':''}>Próxima</button></div>`:`<p class="map-results-empty" role="status">${noLayers?'Nenhuma camada ativada. Escolha uma malha, uma SUB ou ative uma camada em “Exibir no mapa”.':'Nenhum resultado para os filtros selecionados. Ajuste a busca ou os filtros.'}</p>`;
+  const showPage=delta=>{resultPage+=delta;search();$('#operation-results').scrollTop=0;($('#operation-results').querySelector(delta>0?'#results-next:not(:disabled)':'#results-prev:not(:disabled)')||$('#operation-results').querySelector('.map-results-pager button:not(:disabled)'))?.focus({preventScroll:true})};
+  if($('#results-prev')){$('#results-prev').onclick=()=>showPage(-1);$('#results-next').onclick=()=>showPage(1)}
+  root.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{const r=visible[Number(b.dataset.result)];if(r.type==='pdf')showItem(r.item,true);else if(r.type==='sb')focusSB(r.item);else{map.setView([r.item.lat,r.item.lng],15);if(highlight)map.removeLayer(highlight);highlight=L.circleMarker([r.item.lat,r.item.lng],{radius:10,weight:3,color:'#e32028',fillOpacity:.15,interactive:false}).addTo(map);inspect({type:r.type,id:r.type==='station'?r.item.code:r.item.id})}$('.map-panel').classList.remove('open')});
  }
  function focusSB(sb,consult=true){
   map.fitBounds(sb.coordinates.map(([lng,lat])=>[lat,lng]),{padding:[65,65],maxZoom:14});
@@ -190,7 +204,7 @@ const NamedPointsCanvas=SafeCanvas.extend({
    if(focus.type==='sb')focusSB(p,focus.inspect!==false);
    else if(Number.isFinite(p.lat)&&Number.isFinite(p.lng)){
     map.setView([p.lat,p.lng],15);
-    L.circleMarker([p.lat,p.lng],{radius:9,weight:3,color:'#e32028',fillOpacity:.15,bubblingMouseEvents:false}).bindTooltip(esc(p.title||p.name||'Local selecionado')).on('click',()=>inspect(focus,false)).addTo(map);
+    highlight=L.circleMarker([p.lat,p.lng],{radius:9,weight:3,color:'#e32028',fillOpacity:.15,bubblingMouseEvents:false}).bindTooltip(esc(p.title||p.name||'Local selecionado')).on('click',()=>inspect(focus,false)).addTo(map);
     if(focus.inspect!==false)inspect(focus,false);
    }
   }
@@ -284,7 +298,7 @@ export function mountOperationRecords({root,catalog,catalogs=[catalog],points,sb
  }
  const value=v=>esc(v)||'—';
  const coordinateStatus=i=>Number.isFinite(i.lat)&&Number.isFinite(i.lng)?`${Number(i.lat).toFixed(5)}, ${Number(i.lng).toFixed(5)}`:'Sem localização verificada';
- function actions(r,index){const hasMap=r.type!=='station'||(Number.isFinite(r.item.lat)&&Number.isFinite(r.item.lng));return `<div class="row record-actions"><button data-inspect="${index}">Consultar</button>${hasMap?`<button data-map="${index}">${['pdf','sub'].includes(r.type)?'Prancha':'Mapa'}</button>`:''}${r.type==='point'?`<button data-edit="${index}">Editar</button>`:''}</div>`}
+ function actions(r,index){const hasMap=r.type!=='station'||(Number.isFinite(r.item.lat)&&Number.isFinite(r.item.lng));return `<div class="row record-actions"><button data-inspect="${index}">Consultar</button>${hasMap?`<button data-map="${index}">${['pdf','sub'].includes(r.type)?'Prancha':'Mapa'}</button>`:''}${['point','pn','station','sb'].includes(r.type)?directionsLink(r):''}${r.type==='point'?`<button data-edit="${index}">Editar</button>`:''}</div>`}
  function table(){
   const filtered=rows(),pages=Math.max(1,Math.ceil(filtered.length/40));recordPage=Math.min(recordPage,pages-1);
   const shown=filtered.slice(recordPage*40,(recordPage+1)*40);

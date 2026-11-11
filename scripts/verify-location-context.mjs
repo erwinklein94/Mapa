@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {createLocationContext,googleMapsURL} from '../src/location-context.js';
+import {createLocationContext,googleMapsURL,googleMapsDirectionsURL} from '../src/location-context.js';
 import {createMalhaIndex} from '../src/malhas.js';
+
+for(const [lat,lng] of [[null,null],[undefined,0],[NaN,0],[91,0],[0,181],['-23','-46']])assert.equal(googleMapsDirectionsURL(lat,lng),null,'Invalid coordinates must never become a route');
+for(const [lat,lng] of [[0,0],[-23.55,-46.63],[-90,180]]){
+ const url=new URL(googleMapsDirectionsURL(lat,lng));
+ assert.equal(url.origin,'https://www.google.com');assert.equal(url.pathname,'/maps/dir/');
+ assert.equal(url.searchParams.get('api'),'1');assert.equal(url.searchParams.get('destination'),`${lat},${lng}`);
+ assert.equal(url.searchParams.get('travelmode'),'driving');assert.equal(url.searchParams.has('origin'),false,'Google Maps should choose or ask for the origin');
+}
 
 const points=[
  {id:'kmz-a',name:'AMV A',yard:'AAA',lat:0,lng:.01,kind:'AMV',line_type:'Principal'},

@@ -3,7 +3,7 @@ import {createClient} from '@supabase/supabase-js';
 import {validateDocument} from './documents.js';
 import {mountOperationMap,mountOperationRecords,recordsForPoint} from './operation.js';
 import {createMalhaIndex} from './malhas.js';
-import {createLocationContext} from './location-context.js';
+import {createLocationContext,googleMapsURL,googleMapsDirectionsURL} from './location-context.js';
 import {openLocationDetails} from './location-modal.js';
 import {createSubIndex,decorateSubs} from './subs.js';
 const db=createClient('https://rgjdhajnbwmjoqceeypd.supabase.co','sb_publishable_maFGs9599a7NvR_iKwxFUA_bnDLwj03');
@@ -63,7 +63,7 @@ function dialog(title,body,tag='REGISTRO') {const d=$('#modal');d.classList.remo
 function openPoint(p,isNew=false){activity('VIEW_POINT',p.id);dialog(isNew?'Adicionar ponto':p.name,`${p.source_km?`<div class="source-info">Origem: Malha Rumo · <strong>${esc(p.yard)}</strong><br>KM original do arquivo: <strong>${esc(p.source_km)}</strong><br><span class="muted">Valor preservado como recebido; confirme a unidade antes de preencher o AMV.</span></div>`:''}<form id="point-form"><div class="field-grid"><label class="wide">Nome do ponto<input name="name" value="${esc(p.name)}" maxlength="180" required></label><label>Tipo de registro<select name="kind">${options(kinds,p.kind)}</select></label><label>Tipo de linha<select name="line_type">${options(lines,p.line_type)}</select></label><label class="wide">Pátio<input name="yard" value="${esc(p.yard)}" maxlength="180" placeholder="Nome ou sigla do pátio"></label><label>KM de entrada do AMV<input name="km_entry" type="number" step="any" min="0" value="${esc(p.km_entry)}" placeholder="Não informado"></label><label>KM de saída do AMV<input name="km_exit" type="number" step="any" min="0" value="${esc(p.km_exit)}" placeholder="Não informado"></label><label>Latitude<input name="lat" type="number" step="any" min="-90" max="90" value="${p.lat}" required ${p.id.startsWith('kmz-')?'readonly':''}></label><label>Longitude<input name="lng" type="number" step="any" min="-180" max="180" value="${p.lng}" required ${p.id.startsWith('kmz-')?'readonly':''}></label><label class="wide">Observações<textarea name="notes" maxlength="10000" placeholder="Informações sobre este ponto">${esc(p.notes)}</textarea></label></div><p class="error" id="point-error" hidden></p><div class="modal-actions"><button type="button" id="cancel">Cancelar</button><button class="primary">Salvar informações</button></div></form><div class="photos-section"><div class="row between"><h3>Fotos do ponto</h3><label><span class="muted">JPEG, PNG ou WebP · até 10 MB</span><input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp" ${isNew?'disabled':''}></label></div><div id="photos" class="photos"></div><p class="muted" id="photo-status">${isNew?'Salve o ponto para adicionar fotos.':'Carregando fotos…'}</p></div>`);
 const pdfReferences=recordsForPoint(operationCatalogs,p);
 if(pdfReferences.length){const panel=document.createElement('section');panel.className='point-source-context';panel.innerHTML=`<h3>Referências na prancha de operação</h3><p class="muted">Referências por sigla · fontes de 2015 e 2023</p>${pdfReferences.map(r=>`<button type="button" data-source-ref="${r.id}" data-source-catalog="${esc(r.catalogId)}">${esc(r.sourceDate)} · ${esc(r.text)}</button>`).join('')}`;$('.modal-body').prepend(panel);panel.querySelectorAll('[data-source-ref]').forEach(b=>b.onclick=()=>{$('#modal').close();showMapReference({type:'pdf',id:b.dataset.sourceRef,catalogId:b.dataset.sourceCatalog})})}
-const latitude=Number(p.lat),longitude=Number(p.lng);
+const latitude=p.lat,longitude=p.lng;
 if(Number.isFinite(latitude)&&Number.isFinite(longitude)&&Math.abs(latitude)<=90&&Math.abs(longitude)<=180){
   const location=document.createElement('div');
   location.className='point-map-link';
@@ -72,10 +72,15 @@ if(Number.isFinite(latitude)&&Number.isFinite(longitude)&&Math.abs(latitude)<=90
   const mapsLink=document.createElement('a');
   mapsLink.className='maps-link';
   mapsLink.textContent='Abrir no Google Maps';
-  mapsLink.href=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
+  mapsLink.href=googleMapsURL(latitude,longitude);
   mapsLink.target='_blank';
   mapsLink.rel='noopener noreferrer';
-  location.append(coordinates,mapsLink);
+  const routeLink=document.createElement('a');
+  routeLink.className='maps-link directions-link';
+  routeLink.textContent='Como chegar';
+  routeLink.href=googleMapsDirectionsURL(latitude,longitude);
+  routeLink.target='_blank';routeLink.rel='noopener noreferrer';
+  location.append(coordinates,routeLink,mapsLink);
   $('#point-form').before(location);
 }
 $('#cancel').onclick=()=>$('#modal').close();$('#point-form').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));for(const k of ['lat','lng','km_entry','km_exit'])f[k]=f[k]===''?null:Number(f[k]);if(f.km_entry!==null&&f.km_exit!==null&&f.km_exit<f.km_entry){$('#point-error').hidden=false;$('#point-error').textContent='O KM de saída deve ser maior ou igual ao KM de entrada.';return}const b=$('button.primary',e.target);b.disabled=true;try{await check(db.from('locations').upsert({...f,id:p.id,source_km:p.source_km||'',updated_at:new Date().toISOString()}));await loadPoints();toast('Informações salvas.');if(map)drawPoints();if(route==='records')renderRecords();openPoint(points.find(x=>x.id===p.id))}catch(err){$('#point-error').hidden=false;$('#point-error').textContent=err.message;b.disabled=false}};$('#photo-input').onchange=e=>uploadPhoto(p,e.target.files[0]).catch(fail);if(!isNew)loadPhotos(p).catch(fail)}
